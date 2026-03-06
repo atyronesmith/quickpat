@@ -1,0 +1,13 @@
+[project]
+name = "quickpat"
+version = "0.1.0"
+description = "Convert AI Quickstarts into Validated Patterns"
+requires-python = ">=3.10"
+dependencies = ["pyyaml>=6.0"]
+
+[project.scripts]
+quickpat = "quickpat.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
