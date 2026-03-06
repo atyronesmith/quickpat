@@ -2,7 +2,7 @@
 
 ## Priority 1 — Fix What's Wrong
 
-1. ~~**Secret detection is too noisy**~~ — Expand `SECRET_FALSE_POSITIVES` and filter out structural YAML keys (`secretKeyRef`, `secretName`, `tokenSecretName`, `useCollectorToken`, etc.) that reference secrets rather than being secret values.
+1. ~~**Secret detection is too noisy**~~ — DONE. Filters out references (`secretName`, `secretKeyRef`, `tokenSecretName`), config flags (`useCollectorToken`, `useServiceAccountToken`), paths (`collectorTokenPath`), generic keys (`key`, `secrets`). Dropped from 30+ to 15 real secrets on ai-obs.
 
 2. **Duplicate secrets in values-secret.yaml.template** — Deduplicate by name (or by `chart.field` for multi-chart).
 

@@ -14,8 +14,22 @@ SECRET_PATTERNS = [
 
 # Keys that match SECRET_PATTERNS but aren't actually secrets
 SECRET_FALSE_POSITIVES = {
-    'secretkey',  # often a dict key name, not a secret value
+    'secretkey',      # often a dict key name, not a secret value
+    'key',            # too generic on its own (e.g. secretKeyRef.key)
+    'secrets',        # plural = container, not a value
+    'bearertokenauth',  # OTEL extension name
 }
+
+# Suffixes/patterns that indicate a reference TO a secret, not a secret value
+SECRET_REFERENCE_SUFFIXES = [
+    'name', 'ref', 'path', 'namespace', 'mount', 'class',
+    'store', 'backend', 'provider', 'type', 'kind', 'version',
+]
+
+# Prefixes that indicate config about secrets, not secret values
+SECRET_CONFIG_PREFIXES = [
+    'use', 'enable', 'disable', 'is', 'has', 'no',
+]
 
 
 @dataclass
@@ -189,20 +203,54 @@ class QuickstartAnalyzer:
         if isinstance(obj, dict):
             for key, value in obj.items():
                 current = f"{path}.{key}" if path else key
-                key_lower = key.lower()
-                if (
-                    any(p in key_lower for p in SECRET_PATTERNS)
-                    and key_lower not in SECRET_FALSE_POSITIVES
-                ):
-                    analysis.detected_secrets.append(SecretRef(
-                        name=key,
-                        path=current,
-                        description=f"Potential secret: {key}",
-                    ))
+                if self._is_secret_key(key):
+                    # Only flag leaf values or dicts that look like secret containers
+                    # Skip if the value is a complex nested structure (it's a config block)
+                    if not isinstance(value, dict) or self._is_secret_leaf_dict(value):
+                        analysis.detected_secrets.append(SecretRef(
+                            name=key,
+                            path=current,
+                            description=f"Potential secret: {key}",
+                        ))
                 self._walk_for_secrets(analysis, value, current)
         elif isinstance(obj, list):
             for i, item in enumerate(obj):
                 self._walk_for_secrets(analysis, item, f"{path}[{i}]")
+
+    def _is_secret_key(self, key: str) -> bool:
+        """Check if a YAML key likely holds a secret value."""
+        key_lower = key.lower()
+
+        if key_lower in SECRET_FALSE_POSITIVES:
+            return False
+
+        # Must match at least one secret pattern
+        if not any(p in key_lower for p in SECRET_PATTERNS):
+            return False
+
+        # Filter out references TO secrets (secretName, secretKeyRef, etc.)
+        for suffix in SECRET_REFERENCE_SUFFIXES:
+            # e.g. secretName, tokenSecretName, secretKeyRef
+            if key_lower.endswith(suffix) and key_lower != suffix:
+                return False
+
+        # Filter out boolean/config flags (useToken, enableSecret, etc.)
+        for prefix in SECRET_CONFIG_PREFIXES:
+            if key_lower.startswith(prefix) and len(key_lower) > len(prefix):
+                # Check the char after prefix is uppercase (camelCase) or underscore
+                next_char = key[len(prefix)]
+                if next_char.isupper() or next_char == '_':
+                    return False
+
+        return True
+
+    def _is_secret_leaf_dict(self, d: dict) -> bool:
+        """Check if a dict is a simple secret container (e.g. {password: '', token: ''})
+        vs a complex config block."""
+        if len(d) > 5:
+            return False
+        # If all values are scalars, it's likely a secret container
+        return all(not isinstance(v, (dict, list)) for v in d.values())
 
     def _detect_features(self, analysis, search_text):
         dep_names = {d.name.lower() for d in analysis.dependencies}
