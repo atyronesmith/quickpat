@@ -47,6 +47,15 @@ class SecretRef:
     description: str = ""
 
 
+# Template-level CRDs and dependency names that indicate OpenShift AI namespace labels are needed
+INFERENCE_INDICATORS = [
+    'inferenceservice', 'servingruntime', 'datasciencecluster',
+]
+INFERENCE_DEPENDENCY_NAMES = {
+    'llm-service', 'vllm', 'llama-stack', 'model-service', 'tgi',
+}
+
+
 @dataclass
 class ChartInfo:
     """Info about a single Helm chart within a quickstart."""
@@ -56,6 +65,7 @@ class ChartInfo:
     chart_path: str = ""
     dependencies: list = field(default_factory=list)
     values: dict = field(default_factory=dict)
+    needs_oai_labels: bool = False
 
 
 @dataclass
@@ -96,6 +106,15 @@ class QuickstartAnalyzer:
             ci.chart_path = str(chart_path)
             self._parse_chart_info(ci, chart_path)
             self._parse_chart_values(ci, chart_path)
+
+            chart_text = self._build_search_text(chart_path)
+            chart_text_lower = chart_text.lower()
+            dep_names = {d.name.lower() for d in ci.dependencies}
+            ci.needs_oai_labels = (
+                any(ind in chart_text_lower for ind in INFERENCE_INDICATORS)
+                or bool(dep_names & INFERENCE_DEPENDENCY_NAMES)
+            )
+
             analysis.charts.append(ci)
 
             # Aggregate dependencies and values into analysis
@@ -103,7 +122,7 @@ class QuickstartAnalyzer:
             for key, val in ci.values.items():
                 analysis.values.setdefault(key, val)
 
-            search_texts.append(self._build_search_text(chart_path))
+            search_texts.append(chart_text)
 
         # Set top-level fields from first chart (single-chart) or repo name (multi-chart)
         if len(analysis.charts) == 1:

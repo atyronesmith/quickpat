@@ -6,7 +6,7 @@
 
 2. ~~**Duplicate secrets in values-secret.yaml.template**~~ — DONE. Deduplicates by appending parent path segment (`pgvector_secret`, `minio_secret`) and counter suffix when needed.
 
-3. **OpenShift AI labels applied to every namespace** — Only namespaces running inference services should get `opendatahub.io/dashboard` labels.
+3. ~~**OpenShift AI labels applied to every namespace**~~ — DONE. Per-chart `needs_oai_labels` flag based on inference CRDs in templates or inference dependencies (llm-service, vllm, llama-stack). Only matching namespaces get labeled.
 
 4. **`print_results` in cli.py** — Still shows single-chart output format for multi-chart quickstarts. Should list all chart directories.
 

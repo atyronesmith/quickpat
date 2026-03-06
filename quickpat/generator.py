@@ -93,13 +93,14 @@ class PatternGenerator:
         }
         self._write_yaml(self.output_dir / 'values-hub.yaml', data)
 
-    def _get_app_namespaces(self):
-        """Return list of (app_name, namespace) tuples for all charts."""
+    def _get_app_charts(self):
+        """Return list of (app_name, namespace, ChartInfo) for all charts."""
         if len(self.analysis.charts) > 1:
-            return [(ci.name, ci.name) for ci in self.analysis.charts]
+            return [(ci.name, ci.name, ci) for ci in self.analysis.charts]
+        ci = self.analysis.charts[0]
         app_name = self.config.get('app_name', self.analysis.name)
         app_ns = self.config.get('app_namespace', self.analysis.name)
-        return [(app_name, app_ns)]
+        return [(app_name, app_ns, ci)]
 
     def _build_namespaces(self, operators, app_namespace, use_vault):
         namespaces = []
@@ -125,13 +126,12 @@ class PatternGenerator:
             else:
                 namespaces.append(ns)
 
-        # Application namespaces (one per chart for multi-chart)
-        has_oai = 'openshift-ai' in operators
-        for _, ns in self._get_app_namespaces():
+        # Application namespaces — only add OAI labels where needed
+        for _, ns, ci in self._get_app_charts():
             if ns in seen:
                 continue
             seen.add(ns)
-            if has_oai:
+            if ci.needs_oai_labels:
                 namespaces.append({ns: {
                     'operatorGroup': True,
                     'targetNamespaces': [ns],
@@ -179,7 +179,7 @@ class PatternGenerator:
             }
 
         # Application chart(s)
-        for name, ns in self._get_app_namespaces():
+        for name, ns, _ in self._get_app_charts():
             if self.config.get('chart_strategy') == 'local':
                 applications[name] = {
                     'name': name,
