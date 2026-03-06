@@ -34,6 +34,9 @@ Iterate over the registry and generate patterns for all of them. Useful for test
 ### 4. Publication readiness check
 The pub repo has a readiness checklist. QuickPat could add a `quickpat check-ready` command that validates a quickstart against some of those criteria programmatically (README exists, chart runs, no broken deps).
 
-## Recommendation
+## Status
 
-**Start with 1 and 2** — they're simple, immediately useful, and the registry is already structured for it (git submodules with URLs). Item 3 is a natural follow-on for CI/testing. Item 4 is nice-to-have but overlaps with human review.
+- **1. `quickpat list`** — DONE. Fetches `.gitmodules` from GitHub, parses entries, displays names + URLs.
+- **2. `quickpat create <name>`** — DONE. Resolves name via registry (exact, case-insensitive, substring), clones, transforms. Error on ambiguous/unknown names.
+- **3. `quickpat batch`** — TODO.
+- **4. Publication readiness check** — TODO.

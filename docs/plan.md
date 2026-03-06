@@ -20,4 +20,4 @@
 
 7. **Unit tests** — Analyzer, validator, generator. At minimum: single-chart, multi-chart, secret dedup, validator fix loop.
 
-8. **Test against remaining quickstarts** — ppe-compliance-monitor, ai-virtual-agent, llm-cpu-serving, lemonade-stand-assistant.
+8. ~~**Test against remaining quickstarts**~~ — DONE. All 11 registered quickstarts pass (create + validate). Includes multi-chart: product-recommender (3), maas-code-assistant (8), ansible-log-analysis (9), lls-observability (18).

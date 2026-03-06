@@ -10,6 +10,7 @@ from . import __version__
 from .analyzer import QuickstartAnalyzer
 from .generator import PatternGenerator, build_report
 from .operators import OPERATORS
+from .registry import fetch_registry, resolve_name
 
 
 def main():
@@ -27,11 +28,18 @@ def main():
 
     subparsers = parser.add_subparsers(dest='command', required=True)
 
+    # list subcommand
+    subparsers.add_parser(
+        'list', help='List available AI Quickstarts from the registry'
+    )
+
     # analyze subcommand
     analyze_p = subparsers.add_parser(
         'analyze', help='Analyze an AI Quickstart'
     )
-    analyze_p.add_argument('path', help='Path or GitHub URL to AI Quickstart')
+    analyze_p.add_argument(
+        'path', help='Path, GitHub URL, or registry name (e.g. RAG)'
+    )
     analyze_p.add_argument('--output', '-o', help='Output directory')
     analyze_p.add_argument('--name', help='Pattern name')
 
@@ -39,7 +47,9 @@ def main():
     create_p = subparsers.add_parser(
         'create', help='Create a Validated Pattern from a Quickstart'
     )
-    create_p.add_argument('path', help='Path or GitHub URL to AI Quickstart')
+    create_p.add_argument(
+        'path', help='Path, GitHub URL, or registry name (e.g. RAG)'
+    )
     create_p.add_argument('--output', '-o', help='Output directory')
     create_p.add_argument('--name', help='Pattern name')
     create_p.add_argument(
@@ -49,23 +59,57 @@ def main():
 
     args = parser.parse_args()
 
-    if args.command == 'analyze':
+    if args.command == 'list':
+        cmd_list()
+    elif args.command == 'analyze':
         cmd_analyze(args)
     elif args.command == 'create':
         cmd_create(args)
 
 
+def cmd_list():
+    """List available quickstarts from the registry."""
+    try:
+        registry = fetch_registry()
+    except RuntimeError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Available AI Quickstarts ({len(registry)}):\n")
+    for entry in registry:
+        print(f"  {entry['name']}")
+        print(f"    {entry.get('url', '')}")
+
+    print(f"\nUse: quickpat create <name>")
+
+
 def resolve_path(path_or_url):
-    """If given a GitHub URL, clone it to a temp dir. Otherwise return as-is."""
+    """Resolve a path, GitHub URL, or registry name to a local path."""
+    # Direct URL
     if path_or_url.startswith(('https://github.com/', 'git@')):
-        tmpdir = tempfile.mkdtemp(prefix='quickpat-')
-        print(f"Cloning {path_or_url}...")
-        subprocess.run(
-            ['git', 'clone', '--depth', '1', path_or_url, tmpdir],
-            check=True, capture_output=True,
-        )
-        return tmpdir
-    return path_or_url
+        return _clone(path_or_url)
+
+    # Local path
+    if Path(path_or_url).exists():
+        return path_or_url
+
+    # Try registry name
+    try:
+        url = resolve_name(path_or_url)
+        return _clone(url)
+    except (ValueError, RuntimeError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _clone(url):
+    tmpdir = tempfile.mkdtemp(prefix='quickpat-')
+    print(f"Cloning {url}...")
+    subprocess.run(
+        ['git', 'clone', '--depth', '1', url, tmpdir],
+        check=True, capture_output=True,
+    )
+    return tmpdir
 
 
 def cmd_analyze(args):
