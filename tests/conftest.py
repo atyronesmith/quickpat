@@ -79,6 +79,58 @@ def multi_chart_quickstart(tmp_path):
 
 
 @pytest.fixture
+def grouped_chart_quickstart(tmp_path):
+    """A multi-chart quickstart with subdirectory grouping."""
+    qs = tmp_path / "grouped-qs"
+    helm_dir = qs / "deploy" / "helm"
+
+    # Two charts grouped under "observability/"
+    obs_a = helm_dir / "observability" / "collector"
+    write_chart(obs_a, "collector", "1.0.0", "OTEL collector")
+    write_values(obs_a, {"collector": {"port": 4317}})
+
+    obs_b = helm_dir / "observability" / "tempo"
+    write_chart(obs_b, "tempo", "1.0.0", "Tempo tracing")
+    write_values(obs_b, {"tempo": {"retention": "48h"}})
+
+    # One chart under "inference/" with an LLM dependency
+    inf = helm_dir / "inference" / "model"
+    write_chart(inf, "model", "1.0.0", "Model serving", dependencies=[
+        {"name": "llm-service", "version": "0.5.9",
+         "repository": "https://rh-ai-quickstart.github.io/ai-architecture-charts"},
+    ])
+    write_values(inf, {"model": {"replicas": 1}})
+
+    # One flat chart (no subdirectory)
+    ui = helm_dir / "ui"
+    write_chart(ui, "ui", "0.3.0", "Frontend")
+    write_values(ui, {"ui": {"port": 8080}})
+
+    return qs
+
+
+@pytest.fixture
+def numbered_group_quickstart(tmp_path):
+    """A quickstart with numbered subdirectory prefixes like lls-observability."""
+    qs = tmp_path / "numbered-qs"
+    helm_dir = qs / "helm"
+
+    a = helm_dir / "01-operators" / "my-operator"
+    write_chart(a, "my-operator", "1.0.0")
+    write_values(a, {"op": {"enabled": True}})
+
+    b = helm_dir / "02-services" / "api"
+    write_chart(b, "api", "1.0.0")
+    write_values(b, {"api": {"port": 8080}})
+
+    c = helm_dir / "02-services" / "worker"
+    write_chart(c, "worker", "1.0.0")
+    write_values(c, {"worker": {"replicas": 2}})
+
+    return qs
+
+
+@pytest.fixture
 def gpu_chart_quickstart(tmp_path):
     """A quickstart with GPU indicators in templates."""
     qs = tmp_path / "gpu-qs"

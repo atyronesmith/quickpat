@@ -12,7 +12,7 @@
 
 ## Priority 2 — Improve Multi-Chart
 
-5. **Smarter namespace grouping** — Group charts by subdirectory structure (`observability/` → shared namespace) as a heuristic instead of one namespace per chart.
+5. ~~**Smarter namespace grouping**~~ — DONE. Charts sharing a subdirectory (e.g. `observability/korrel8r`, `observability/loki`) get a shared namespace. Numbered prefixes like `01-operators` are stripped. lls-obs: 18 charts → 4 namespaces. OAI labels applied if any chart in group needs them.
 
 6. **Test skills pipeline with multi-chart** — Run `skills/transform_quickstart.py transform` against a multi-chart quickstart.
 

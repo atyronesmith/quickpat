@@ -63,6 +63,7 @@ class ChartInfo:
     version: str = ""
     description: str = ""
     chart_path: str = ""
+    group: str = ""  # subdirectory group for namespace sharing
     dependencies: list = field(default_factory=list)
     values: dict = field(default_factory=dict)
     needs_oai_labels: bool = False
@@ -97,13 +98,23 @@ class QuickstartAnalyzer:
         """Run full analysis and return results."""
         analysis = QuickstartAnalysis()
 
-        chart_paths = self._find_charts()
+        search_root, chart_paths = self._find_charts()
 
         # Analyze each chart
         search_texts = []
         for chart_path in chart_paths:
             ci = ChartInfo()
             ci.chart_path = str(chart_path)
+
+            # Compute group from subdirectory structure
+            try:
+                rel = chart_path.relative_to(search_root)
+                parts = rel.parts
+                if len(parts) > 1:
+                    ci.group = self._strip_numeric_prefix(parts[0])
+            except ValueError:
+                pass
+
             self._parse_chart_info(ci, chart_path)
             self._parse_chart_values(ci, chart_path)
 
@@ -145,10 +156,12 @@ class QuickstartAnalyzer:
 
         return analysis
 
-    def _find_charts(self) -> list:
+    def _find_charts(self):
         """Locate all Chart.yaml files in common quickstart layouts.
 
-        Returns a list of Paths to directories containing Chart.yaml.
+        Returns (search_root, chart_paths) where search_root is the
+        directory that was searched and chart_paths is a list of Paths
+        to directories containing Chart.yaml.
         """
         search_dirs = [
             self.path / 'deploy' / 'helm',
@@ -164,7 +177,7 @@ class QuickstartAnalyzer:
 
             # Check for Chart.yaml directly in this dir
             if (search_dir / 'Chart.yaml').exists():
-                return [search_dir]
+                return search_dir, [search_dir]
 
             # Collect all subdirectories (recursively) that have Chart.yaml
             found = []
@@ -172,13 +185,21 @@ class QuickstartAnalyzer:
                 found.append(child.parent)
 
             if found:
-                return found
+                return search_dir, found
 
         raise FileNotFoundError(
             f"No Chart.yaml found in {self.path}. "
             "Searched: deploy/helm/, deploy/cluster/helm/, helm/, "
             "chart/, root, and their subdirectories."
         )
+
+    @staticmethod
+    def _strip_numeric_prefix(name):
+        """Strip leading numeric prefix like '01-' from directory names."""
+        parts = name.split('-', 1)
+        if len(parts) == 2 and parts[0].isdigit():
+            return parts[1]
+        return name
 
     def _parse_chart_info(self, ci, chart_path):
         with open(chart_path / 'Chart.yaml') as f:

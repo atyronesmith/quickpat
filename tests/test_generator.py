@@ -118,6 +118,53 @@ class TestMultiChartGeneration:
         assert "ui" not in labeled
 
 
+class TestGroupedNamespaces:
+    def test_grouped_charts_share_namespace(self, grouped_chart_quickstart, tmp_path):
+        out, _, _ = _generate(grouped_chart_quickstart, tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "values-hub.yaml") as f:
+            data = yaml.safe_load(f)
+        apps = data["clusterGroup"]["applications"]
+        # collector and tempo share "observability" namespace
+        assert apps["collector"]["namespace"] == "observability"
+        assert apps["tempo"]["namespace"] == "observability"
+        # model is in "inference"
+        assert apps["model"]["namespace"] == "inference"
+        # ui is flat, uses its own name
+        assert apps["ui"]["namespace"] == "ui"
+
+    def test_grouped_namespace_appears_once(self, grouped_chart_quickstart, tmp_path):
+        out, _, _ = _generate(grouped_chart_quickstart, tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "values-hub.yaml") as f:
+            data = yaml.safe_load(f)
+        namespaces = data["clusterGroup"]["namespaces"]
+        # Extract namespace names (could be string or dict key)
+        ns_names = []
+        for ns in namespaces:
+            if isinstance(ns, str):
+                ns_names.append(ns)
+            elif isinstance(ns, dict):
+                ns_names.extend(ns.keys())
+        # "observability" should appear exactly once
+        assert ns_names.count("observability") == 1
+
+    def test_oai_labels_on_grouped_namespace(self, grouped_chart_quickstart, tmp_path):
+        """If any chart in a group needs OAI labels, the namespace gets them."""
+        out, _, _ = _generate(grouped_chart_quickstart, tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "values-hub.yaml") as f:
+            data = yaml.safe_load(f)
+        namespaces = data["clusterGroup"]["namespaces"]
+        # The "inference" namespace should have OAI labels (model has llm-service dep)
+        for ns in namespaces:
+            if isinstance(ns, dict) and "inference" in ns:
+                assert "opendatahub.io/dashboard" in ns["inference"]["labels"]
+                break
+        else:
+            pytest.fail("inference namespace not found with OAI labels")
+
+
 class TestSecretDedup:
     def test_deduplicates_secret_fields(self, tmp_path):
         qs = tmp_path / "qs"

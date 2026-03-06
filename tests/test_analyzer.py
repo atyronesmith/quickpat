@@ -75,6 +75,28 @@ class TestMultiChart:
         assert labels_map["ui"] is False
 
 
+class TestSubdirectoryGrouping:
+    def test_grouped_charts_get_group(self, grouped_chart_quickstart):
+        analysis = QuickstartAnalyzer(str(grouped_chart_quickstart)).analyze()
+        groups = {ci.name: ci.group for ci in analysis.charts}
+        assert groups["collector"] == "observability"
+        assert groups["tempo"] == "observability"
+        assert groups["model"] == "inference"
+        assert groups["ui"] == ""
+
+    def test_numbered_prefix_stripped(self, numbered_group_quickstart):
+        analysis = QuickstartAnalyzer(str(numbered_group_quickstart)).analyze()
+        groups = {ci.name: ci.group for ci in analysis.charts}
+        assert groups["my-operator"] == "operators"
+        assert groups["api"] == "services"
+        assert groups["worker"] == "services"
+
+    def test_flat_charts_have_no_group(self, multi_chart_quickstart):
+        analysis = QuickstartAnalyzer(str(multi_chart_quickstart)).analyze()
+        for ci in analysis.charts:
+            assert ci.group == ""
+
+
 class TestSecretDetection:
     def test_detects_password(self, single_chart_quickstart):
         analysis = QuickstartAnalyzer(str(single_chart_quickstart)).analyze()

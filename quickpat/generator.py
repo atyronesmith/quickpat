@@ -96,7 +96,7 @@ class PatternGenerator:
     def _get_app_charts(self):
         """Return list of (app_name, namespace, ChartInfo) for all charts."""
         if len(self.analysis.charts) > 1:
-            return [(ci.name, ci.name, ci) for ci in self.analysis.charts]
+            return [(ci.name, ci.group or ci.name, ci) for ci in self.analysis.charts]
         ci = self.analysis.charts[0]
         app_name = self.config.get('app_name', self.analysis.name)
         app_ns = self.config.get('app_namespace', self.analysis.name)
@@ -127,11 +127,18 @@ class PatternGenerator:
                 namespaces.append(ns)
 
         # Application namespaces — only add OAI labels where needed
-        for _, ns, ci in self._get_app_charts():
+        # Pre-compute: if ANY chart in a namespace needs labels, the namespace gets them
+        app_charts = self._get_app_charts()
+        ns_needs_labels = set()
+        for _, ns, ci in app_charts:
+            if ci.needs_oai_labels:
+                ns_needs_labels.add(ns)
+
+        for _, ns, ci in app_charts:
             if ns in seen:
                 continue
             seen.add(ns)
-            if ci.needs_oai_labels:
+            if ns in ns_needs_labels:
                 namespaces.append({ns: {
                     'operatorGroup': True,
                     'targetNamespaces': [ns],
