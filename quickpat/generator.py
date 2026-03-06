@@ -208,9 +208,23 @@ class PatternGenerator:
             return
 
         fields = []
+        seen_names = {}  # name -> count
         for secret in self.analysis.detected_secrets:
+            name = secret.name
+            if name in seen_names:
+                # Disambiguate using the path: rag.pgvector.secret.password -> pgvector_password
+                parts = [p for p in secret.path.replace('[', '.').replace(']', '').split('.')
+                         if p and p != name]
+                # Use the last meaningful path segment + name
+                if parts:
+                    name = f"{parts[-1]}_{name}"
+                # If still a dupe, add a counter
+                if name in seen_names:
+                    seen_names[name] += 1
+                    name = f"{name}_{seen_names[name]}"
+            seen_names[name] = 1
             fields.append({
-                'name': secret.name,
+                'name': name,
                 'onMissingValue': 'prompt',
             })
 

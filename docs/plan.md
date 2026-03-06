@@ -4,7 +4,7 @@
 
 1. ~~**Secret detection is too noisy**~~ — DONE. Filters out references (`secretName`, `secretKeyRef`, `tokenSecretName`), config flags (`useCollectorToken`, `useServiceAccountToken`), paths (`collectorTokenPath`), generic keys (`key`, `secrets`). Dropped from 30+ to 15 real secrets on ai-obs.
 
-2. **Duplicate secrets in values-secret.yaml.template** — Deduplicate by name (or by `chart.field` for multi-chart).
+2. ~~**Duplicate secrets in values-secret.yaml.template**~~ — DONE. Deduplicates by appending parent path segment (`pgvector_secret`, `minio_secret`) and counter suffix when needed.
 
 3. **OpenShift AI labels applied to every namespace** — Only namespaces running inference services should get `opendatahub.io/dashboard` labels.
 
