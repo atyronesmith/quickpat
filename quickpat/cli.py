@@ -265,7 +265,13 @@ def print_results(config):
     print(f"  ansible.cfg")
     print(f"  .gitignore")
     if config.get('chart_strategy') == 'local':
-        print(f"  charts/all/{config['app_name']}/")
+        charts_dir = Path(output) / 'charts' / 'all'
+        if charts_dir.is_dir():
+            for d in sorted(charts_dir.iterdir()):
+                if d.is_dir():
+                    print(f"  charts/all/{d.name}/")
+        else:
+            print(f"  charts/all/{config.get('app_name', 'app')}/")
     print(f"  overrides/")
     print(f"  docs/quickstart-analysis.md")
 
