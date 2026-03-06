@@ -1,0 +1,23 @@
+# QuickPat Plan
+
+## Priority 1 — Fix What's Wrong
+
+1. ~~**Secret detection is too noisy**~~ — Expand `SECRET_FALSE_POSITIVES` and filter out structural YAML keys (`secretKeyRef`, `secretName`, `tokenSecretName`, `useCollectorToken`, etc.) that reference secrets rather than being secret values.
+
+2. **Duplicate secrets in values-secret.yaml.template** — Deduplicate by name (or by `chart.field` for multi-chart).
+
+3. **OpenShift AI labels applied to every namespace** — Only namespaces running inference services should get `opendatahub.io/dashboard` labels.
+
+4. **`print_results` in cli.py** — Still shows single-chart output format for multi-chart quickstarts. Should list all chart directories.
+
+## Priority 2 — Improve Multi-Chart
+
+5. **Smarter namespace grouping** — Group charts by subdirectory structure (`observability/` → shared namespace) as a heuristic instead of one namespace per chart.
+
+6. **Test skills pipeline with multi-chart** — Run `skills/transform_quickstart.py transform` against a multi-chart quickstart.
+
+## Priority 3 — Harden
+
+7. **Unit tests** — Analyzer, validator, generator. At minimum: single-chart, multi-chart, secret dedup, validator fix loop.
+
+8. **Test against remaining quickstarts** — ppe-compliance-monitor, ai-virtual-agent, llm-cpu-serving, lemonade-stand-assistant.

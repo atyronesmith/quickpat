@@ -5,7 +5,7 @@ from pathlib import Path
 
 import yaml
 
-from .analyzer import QuickstartAnalysis
+from .analyzer import QuickstartAnalysis, ChartInfo
 from .operators import OPERATORS
 
 
@@ -93,6 +93,14 @@ class PatternGenerator:
         }
         self._write_yaml(self.output_dir / 'values-hub.yaml', data)
 
+    def _get_app_namespaces(self):
+        """Return list of (app_name, namespace) tuples for all charts."""
+        if len(self.analysis.charts) > 1:
+            return [(ci.name, ci.name) for ci in self.analysis.charts]
+        app_name = self.config.get('app_name', self.analysis.name)
+        app_ns = self.config.get('app_namespace', self.analysis.name)
+        return [(app_name, app_ns)]
+
     def _build_namespaces(self, operators, app_namespace, use_vault):
         namespaces = []
         seen = set()
@@ -117,20 +125,23 @@ class PatternGenerator:
             else:
                 namespaces.append(ns)
 
-        # Application namespace
-        if app_namespace not in seen:
-            has_oai = 'openshift-ai' in operators
+        # Application namespaces (one per chart for multi-chart)
+        has_oai = 'openshift-ai' in operators
+        for _, ns in self._get_app_namespaces():
+            if ns in seen:
+                continue
+            seen.add(ns)
             if has_oai:
-                namespaces.append({app_namespace: {
+                namespaces.append({ns: {
                     'operatorGroup': True,
-                    'targetNamespaces': [app_namespace],
+                    'targetNamespaces': [ns],
                     'labels': {
                         'opendatahub.io/dashboard': 'true',
                         'modelmesh-enabled': 'false',
                     },
                 }})
             else:
-                namespaces.append(app_namespace)
+                namespaces.append(ns)
 
         return namespaces
 
@@ -167,25 +178,26 @@ class PatternGenerator:
                 'chartVersion': '0.2.*',
             }
 
-        # The quickstart application
-        if self.config.get('chart_strategy') == 'local':
-            applications[app_name] = {
-                'name': app_name,
-                'namespace': app_namespace,
-                'project': 'hub',
-                'path': f'charts/all/{app_name}',
-            }
-        else:
-            applications[app_name] = {
-                'name': app_name,
-                'namespace': app_namespace,
-                'project': 'hub',
-                'repoURL': self.config.get('chart_repo_url', ''),
-                'chart': self.analysis.name,
-                'targetRevision': self.config.get(
-                    'chart_version', self.analysis.version
-                ),
-            }
+        # Application chart(s)
+        for name, ns in self._get_app_namespaces():
+            if self.config.get('chart_strategy') == 'local':
+                applications[name] = {
+                    'name': name,
+                    'namespace': ns,
+                    'project': 'hub',
+                    'path': f'charts/all/{name}',
+                }
+            else:
+                applications[name] = {
+                    'name': name,
+                    'namespace': ns,
+                    'project': 'hub',
+                    'repoURL': self.config.get('chart_repo_url', ''),
+                    'chart': name,
+                    'targetRevision': self.config.get(
+                        'chart_version', self.analysis.version
+                    ),
+                }
 
         return applications
 
@@ -486,14 +498,14 @@ podman run -it --rm --pull=newer \
     # ── charts ──────────────────────────────────────────────────────
 
     def _copy_chart_locally(self):
-        app_name = self.config.get('app_name', self.analysis.name)
-        dest = self.output_dir / 'charts' / 'all' / app_name
-        src = Path(self.analysis.chart_path)
+        for ci in self.analysis.charts:
+            dest = self.output_dir / 'charts' / 'all' / ci.name
+            src = Path(ci.chart_path)
 
-        if dest.exists():
-            shutil.rmtree(dest)
+            if dest.exists():
+                shutil.rmtree(dest)
 
-        shutil.copytree(src, dest)
+            shutil.copytree(src, dest)
 
     # ── docs report ─────────────────────────────────────────────────
 

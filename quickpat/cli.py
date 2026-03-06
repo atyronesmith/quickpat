@@ -117,10 +117,17 @@ def cmd_create(args):
 
 
 def print_analysis(analysis):
-    print(f"Chart: {analysis.name} v{analysis.version}")
-    if analysis.description:
-        print(f"Description: {analysis.description}")
-    print(f"Location: {analysis.chart_path}")
+    if len(analysis.charts) > 1:
+        print(f"Quickstart: {analysis.name} ({len(analysis.charts)} charts)")
+        for ci in analysis.charts:
+            desc = f" — {ci.description}" if ci.description else ""
+            print(f"  - {ci.name} v{ci.version}{desc}")
+        print(f"Location: {analysis.chart_path}")
+    else:
+        print(f"Chart: {analysis.name} v{analysis.version}")
+        if analysis.description:
+            print(f"Description: {analysis.description}")
+        print(f"Location: {analysis.chart_path}")
 
     if analysis.dependencies:
         print(f"\nDependencies ({len(analysis.dependencies)}):")

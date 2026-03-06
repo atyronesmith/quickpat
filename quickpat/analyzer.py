@@ -34,12 +34,24 @@ class SecretRef:
 
 
 @dataclass
+class ChartInfo:
+    """Info about a single Helm chart within a quickstart."""
+    name: str = ""
+    version: str = ""
+    description: str = ""
+    chart_path: str = ""
+    dependencies: list = field(default_factory=list)
+    values: dict = field(default_factory=dict)
+
+
+@dataclass
 class QuickstartAnalysis:
     """Results of analyzing an AI Quickstart."""
     name: str = ""
     version: str = ""
     description: str = ""
     chart_path: str = ""
+    charts: list = field(default_factory=list)  # list[ChartInfo]
     dependencies: list = field(default_factory=list)
     detected_operators: list = field(default_factory=list)
     detected_secrets: list = field(default_factory=list)
@@ -61,40 +73,73 @@ class QuickstartAnalyzer:
         """Run full analysis and return results."""
         analysis = QuickstartAnalysis()
 
-        chart_path = self._find_chart()
-        analysis.chart_path = str(chart_path)
+        chart_paths = self._find_charts()
 
-        self._parse_chart_yaml(analysis, chart_path)
-        self._parse_values(analysis, chart_path)
+        # Analyze each chart
+        search_texts = []
+        for chart_path in chart_paths:
+            ci = ChartInfo()
+            ci.chart_path = str(chart_path)
+            self._parse_chart_info(ci, chart_path)
+            self._parse_chart_values(ci, chart_path)
+            analysis.charts.append(ci)
 
-        search_text = self._build_search_text(chart_path)
-        self._detect_operators(analysis, search_text)
+            # Aggregate dependencies and values into analysis
+            analysis.dependencies.extend(ci.dependencies)
+            for key, val in ci.values.items():
+                analysis.values.setdefault(key, val)
+
+            search_texts.append(self._build_search_text(chart_path))
+
+        # Set top-level fields from first chart (single-chart) or repo name (multi-chart)
+        if len(analysis.charts) == 1:
+            first = analysis.charts[0]
+            analysis.name = first.name
+            analysis.version = first.version
+            analysis.description = first.description
+            analysis.chart_path = first.chart_path
+        else:
+            analysis.name = self.path.name
+            analysis.version = "0.1.0"
+            analysis.description = f"Multi-chart quickstart ({len(analysis.charts)} charts)"
+            analysis.chart_path = str(chart_paths[0].parent)
+
+        # Detect operators/secrets/features across all charts
+        combined_text = '\n'.join(search_texts)
+        self._detect_operators(analysis, combined_text)
         self._detect_secrets(analysis)
-        self._detect_features(analysis, search_text)
+        self._detect_features(analysis, combined_text)
 
         return analysis
 
-    def _find_chart(self) -> Path:
-        """Locate the Chart.yaml in common quickstart layouts."""
-        # Known AI Quickstart conventions, checked in priority order
+    def _find_charts(self) -> list:
+        """Locate all Chart.yaml files in common quickstart layouts.
+
+        Returns a list of Paths to directories containing Chart.yaml.
+        """
         search_dirs = [
-            self.path / 'deploy' / 'helm',    # RAG, ppe-compliance-monitor
-            self.path / 'deploy' / 'cluster' / 'helm',  # ai-virtual-agent
-            self.path / 'helm',                # llm-cpu-serving
-            self.path / 'chart',               # lemonade-stand-assistant
-            self.path,                         # Chart.yaml at root
+            self.path / 'deploy' / 'helm',
+            self.path / 'deploy' / 'cluster' / 'helm',
+            self.path / 'helm',
+            self.path / 'chart',
+            self.path,
         ]
 
         for search_dir in search_dirs:
             if not search_dir.is_dir():
                 continue
+
             # Check for Chart.yaml directly in this dir
             if (search_dir / 'Chart.yaml').exists():
-                return search_dir
-            # Check one level of subdirectories (e.g. deploy/helm/rag/)
-            for child in sorted(search_dir.iterdir()):
-                if child.is_dir() and (child / 'Chart.yaml').exists():
-                    return child
+                return [search_dir]
+
+            # Collect all subdirectories (recursively) that have Chart.yaml
+            found = []
+            for child in sorted(search_dir.rglob('Chart.yaml')):
+                found.append(child.parent)
+
+            if found:
+                return found
 
         raise FileNotFoundError(
             f"No Chart.yaml found in {self.path}. "
@@ -102,27 +147,27 @@ class QuickstartAnalyzer:
             "chart/, root, and their subdirectories."
         )
 
-    def _parse_chart_yaml(self, analysis, chart_path):
+    def _parse_chart_info(self, ci, chart_path):
         with open(chart_path / 'Chart.yaml') as f:
             chart = yaml.safe_load(f) or {}
 
-        analysis.name = chart.get('name', self.path.name)
-        analysis.version = chart.get('version', '0.1.0')
-        analysis.description = chart.get('description', '')
+        ci.name = chart.get('name', chart_path.name)
+        ci.version = chart.get('version', '0.1.0')
+        ci.description = chart.get('description', '')
 
         for dep in chart.get('dependencies', []):
-            analysis.dependencies.append(ChartDependency(
+            ci.dependencies.append(ChartDependency(
                 name=dep.get('name', ''),
                 version=dep.get('version', '*'),
                 repository=dep.get('repository', ''),
                 condition=dep.get('condition', ''),
             ))
 
-    def _parse_values(self, analysis, chart_path):
+    def _parse_chart_values(self, ci, chart_path):
         values_file = chart_path / 'values.yaml'
         if values_file.exists():
             with open(values_file) as f:
-                analysis.values = yaml.safe_load(f) or {}
+                ci.values = yaml.safe_load(f) or {}
 
     def _detect_operators(self, analysis, search_text):
         text_lower = search_text.lower()
@@ -137,7 +182,8 @@ class QuickstartAnalyzer:
         analysis.detected_operators = resolve_co_dependencies(detected)
 
     def _detect_secrets(self, analysis):
-        self._walk_for_secrets(analysis, analysis.values, '')
+        for ci in analysis.charts:
+            self._walk_for_secrets(analysis, ci.values, ci.name)
 
     def _walk_for_secrets(self, analysis, obj, path):
         if isinstance(obj, dict):
