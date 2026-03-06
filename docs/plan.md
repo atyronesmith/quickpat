@@ -18,7 +18,7 @@
 
 ## Priority 3 — Harden
 
-7. **Unit tests** — Analyzer, validator, generator. At minimum: single-chart, multi-chart, secret dedup, validator fix loop.
+7. ~~**Unit tests**~~ — DONE. 62 tests: analyzer (25), generator (13), validator (18), operators (6). Covers single/multi-chart, secret filtering, OAI labels, dedup, fix loop.
 
 8. ~~**Test against remaining quickstarts**~~ — DONE. All 11 registered quickstarts pass (create + validate). Includes multi-chart: product-recommender (3), maas-code-assistant (8), ansible-log-analysis (9), lls-observability (18).
 
