@@ -28,7 +28,7 @@ See [shared-charts-analysis.md](shared-charts-analysis.md) for full data.
 
 All quickstarts pull from a single shared Helm repo (`ai-architecture-charts`) with 9 reusable charts (pgvector, llm-service, llama-stack, mcp-servers, minio, etc.). Heavy reuse but significant version drift and some local forks.
 
-9. **Dependency freshness check** — Fetch the `ai-architecture-charts` index and flag stale dependency versions in `quickpat analyze` output. e.g. "pgvector 0.1.0 → latest 0.5.5".
+9. ~~**Dependency freshness check**~~ — DONE. Fetches `ai-architecture-charts` index and flags stale versions in `quickpat analyze` output.
 
 10. **Detect local forks of shared charts** — When a quickstart bundles a chart that also exists in `ai-architecture-charts`, flag it. The user can decide whether to use the local copy or switch to the shared dependency.
 

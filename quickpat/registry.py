@@ -1,11 +1,17 @@
-"""Fetch the AI Quickstart registry from ai-quickstart-pub."""
+"""Fetch the AI Quickstart registry and shared chart index."""
 
 import re
 import urllib.request
 
+import yaml
+
 REGISTRY_URL = (
     "https://raw.githubusercontent.com/rh-ai-quickstart/"
     "ai-quickstart-pub/main/.gitmodules"
+)
+
+CHART_REPO_INDEX_URL = (
+    "https://rh-ai-quickstart.github.io/ai-architecture-charts/index.yaml"
 )
 
 GITHUB_BASE = "https://github.com/rh-ai-quickstart"
@@ -90,3 +96,55 @@ def resolve_name(name: str, registry: list = None) -> str:
     raise ValueError(
         f"Unknown quickstart '{name}'. Available: {available}"
     )
+
+
+# ── Shared chart index ───────────────────────────────────────────
+
+
+def fetch_chart_index(url: str = CHART_REPO_INDEX_URL) -> dict:
+    """Fetch the ai-architecture-charts Helm repo index.
+
+    Returns a dict mapping chart name to latest version string.
+    """
+    try:
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            index = yaml.safe_load(resp.read())
+    except Exception as e:
+        raise RuntimeError(f"Failed to fetch chart index: {e}")
+
+    latest = {}
+    for name, versions in index.get("entries", {}).items():
+        if versions:
+            latest[name] = versions[0]["version"]
+    return latest
+
+
+def check_dependency_freshness(dependencies, chart_index=None):
+    """Compare dependency versions against the shared chart repo.
+
+    Args:
+        dependencies: list of ChartDependency from analysis.
+        chart_index: optional pre-fetched index (chart name -> latest version).
+
+    Returns:
+        list of (dep_name, pinned_version, latest_version) for stale deps.
+    """
+    if chart_index is None:
+        try:
+            chart_index = fetch_chart_index()
+        except RuntimeError:
+            return []
+
+    stale = []
+    seen = set()
+    for dep in dependencies:
+        if dep.repository and "ai-architecture-charts" in dep.repository:
+            key = (dep.name, dep.version)
+            if key in seen:
+                continue
+            seen.add(key)
+            latest = chart_index.get(dep.name)
+            if latest and dep.version != latest:
+                stale.append((dep.name, dep.version, latest))
+    return stale

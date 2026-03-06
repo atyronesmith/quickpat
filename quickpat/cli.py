@@ -10,7 +10,7 @@ from . import __version__
 from .analyzer import QuickstartAnalyzer
 from .generator import PatternGenerator, build_report
 from .operators import OPERATORS
-from .registry import fetch_registry, resolve_name
+from .registry import fetch_registry, resolve_name, check_dependency_freshness
 
 
 def main():
@@ -206,6 +206,13 @@ def print_analysis(analysis):
         print("\nPotential secrets:")
         for s in analysis.detected_secrets:
             print(f"  - {s.name} (at {s.path})")
+
+    if analysis.dependencies:
+        stale = check_dependency_freshness(analysis.dependencies)
+        if stale:
+            print("\nStale dependencies:")
+            for name, pinned, latest in stale:
+                print(f"  - {name} {pinned} -> {latest} available")
 
     print()
 
