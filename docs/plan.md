@@ -30,7 +30,7 @@ All quickstarts pull from a single shared Helm repo (`ai-architecture-charts`) w
 
 9. ~~**Dependency freshness check**~~ — DONE. Fetches `ai-architecture-charts` index and flags stale versions in `quickpat analyze` output.
 
-10. **Detect local forks of shared charts** — When a quickstart bundles a chart that also exists in `ai-architecture-charts`, flag it. The user can decide whether to use the local copy or switch to the shared dependency.
+10. ~~**Detect local forks of shared charts**~~ — DONE. Flags local charts whose name matches a shared chart in `ai-architecture-charts` and that don't pull it as a dependency. Detected: product-rec (2x minio), lls-obs (llama-stack).
 
 11. **External chart strategy for shared deps** — When generating a pattern with `--chart-strategy external`, reference shared charts from `ai-architecture-charts` by URL instead of copying locally. Only copy truly local/custom charts.
 

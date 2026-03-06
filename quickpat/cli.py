@@ -10,7 +10,10 @@ from . import __version__
 from .analyzer import QuickstartAnalyzer
 from .generator import PatternGenerator, build_report
 from .operators import OPERATORS
-from .registry import fetch_registry, resolve_name, check_dependency_freshness
+from .registry import (
+    fetch_registry, resolve_name, check_dependency_freshness,
+    detect_local_forks, fetch_chart_index,
+)
 
 
 def main():
@@ -207,12 +210,28 @@ def print_analysis(analysis):
         for s in analysis.detected_secrets:
             print(f"  - {s.name} (at {s.path})")
 
-    if analysis.dependencies:
-        stale = check_dependency_freshness(analysis.dependencies)
+    # Fetch shared chart index once for both checks
+    chart_index = None
+    if analysis.dependencies or len(analysis.charts) > 1:
+        try:
+            chart_index = fetch_chart_index()
+        except RuntimeError:
+            pass
+
+    if analysis.dependencies and chart_index:
+        stale = check_dependency_freshness(analysis.dependencies, chart_index)
         if stale:
             print("\nStale dependencies:")
             for name, pinned, latest in stale:
                 print(f"  - {name} {pinned} -> {latest} available")
+
+    if chart_index:
+        forks = detect_local_forks(analysis.charts, chart_index)
+        if forks:
+            print("\nLocal forks of shared charts:")
+            for name, path, latest in forks:
+                print(f"  - {name} (at {path})")
+                print(f"    shared version {latest} available in ai-architecture-charts")
 
     print()
 

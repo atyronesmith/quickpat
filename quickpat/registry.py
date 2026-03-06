@@ -148,3 +148,33 @@ def check_dependency_freshness(dependencies, chart_index=None):
             if latest and dep.version != latest:
                 stale.append((dep.name, dep.version, latest))
     return stale
+
+
+def detect_local_forks(charts, chart_index=None):
+    """Detect local charts that duplicate a shared chart from ai-architecture-charts.
+
+    Args:
+        charts: list of ChartInfo from analysis.
+        chart_index: optional pre-fetched index (chart name -> latest version).
+
+    Returns:
+        list of (chart_name, chart_path, shared_latest_version) for local forks.
+    """
+    if chart_index is None:
+        try:
+            chart_index = fetch_chart_index()
+        except RuntimeError:
+            return []
+
+    forks = []
+    for ci in charts:
+        # Skip charts that are already declared as dependencies from the shared repo
+        has_shared_dep = any(
+            d.repository and "ai-architecture-charts" in d.repository
+            for d in ci.dependencies
+        )
+        # A local fork: chart name matches a shared chart, and it's not
+        # pulling it as a dependency from the shared repo
+        if ci.name in chart_index and not has_shared_dep:
+            forks.append((ci.name, ci.chart_path, chart_index[ci.name]))
+    return forks
