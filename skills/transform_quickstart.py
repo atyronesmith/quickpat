@@ -46,8 +46,9 @@ from quickpat.operators import OPERATORS
 from skill_validate import validate_and_fix, validate, ValidationResult
 
 
-# Type alias: an LLM callable takes (system_prompt, user_message) -> response
-LLMCallable = Callable[[str, str], str]
+# Type alias: an LLM callable takes (system, user) -> str
+# or with structured output: (system, user, response_schema=schema) -> dict
+LLMCallable = Callable
 
 
 @dataclass
@@ -238,6 +239,39 @@ def transform(
     return result
 
 
+# ── Response schemas for structured output ─────────────────────────
+
+OPERATOR_CHECK_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "operators": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Operator keys to add (from the allowed list)",
+        },
+    },
+    "required": ["operators"],
+    "additionalProperties": False,
+}
+
+SECRET_REVIEW_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "false_positives": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Secret names that are NOT real secrets",
+        },
+        "summary": {
+            "type": "string",
+            "description": "Brief summary of findings",
+        },
+    },
+    "required": ["false_positives", "summary"],
+    "additionalProperties": False,
+}
+
+
 # ── LLM helpers ─────────────────────────────────────────────────────
 
 
@@ -246,12 +280,12 @@ def _llm_check_operators(llm: LLMCallable, analysis: QuickstartAnalysis) -> list
         f"- {d.name} {d.version} (from {d.repository or 'local'})"
         for d in analysis.dependencies
     )
+    valid_keys = ", ".join(OPERATORS.keys())
     system = (
         "You are an OpenShift operator expert. Given a list of Helm chart "
         "dependencies, identify any that require OpenShift operators not "
-        "already detected. Only respond with operator keys from this list: "
-        + ", ".join(OPERATORS.keys())
-        + ". If none are needed, respond with 'none'."
+        f"already detected. Only use operator keys from this list: {valid_keys}. "
+        "Return an empty list if none are needed."
     )
     user = (
         f"Chart: {analysis.name}\n"
@@ -259,7 +293,11 @@ def _llm_check_operators(llm: LLMCallable, analysis: QuickstartAnalysis) -> list
         f"Dependencies:\n{dep_list}"
     )
     try:
-        response = llm(system, user).strip().lower()
+        result = llm(system, user, response_schema=OPERATOR_CHECK_SCHEMA)
+        if isinstance(result, dict):
+            return [k for k in result.get("operators", []) if k in OPERATORS]
+        # Fallback: text parsing for adapters without structured output
+        response = result.strip().lower()
         if response == "none":
             return []
         candidates = [k.strip() for k in response.split(",")]
@@ -279,7 +317,14 @@ def _llm_review_secrets(llm: LLMCallable, analysis: QuickstartAnalysis) -> str:
     )
     user = f"Chart: {analysis.name}\nDetected secrets:\n{secret_list}"
     try:
-        return llm(system, user).strip()
+        result = llm(system, user, response_schema=SECRET_REVIEW_SCHEMA)
+        if isinstance(result, dict):
+            summary = result.get("summary", "")
+            fps = result.get("false_positives", [])
+            if fps:
+                return f"{summary} False positives: {', '.join(fps)}"
+            return summary
+        return result.strip()
     except Exception:
         return ""
 
@@ -317,60 +362,133 @@ def _list_created_files(output_dir: str, config: dict) -> list:
 
 
 def make_openai_llm(model: str = "gpt-4o-mini", api_key: str = None):
-    """Create an LLM callable using OpenAI's API."""
+    """Create an LLM callable using OpenAI's API.
+
+    Supports structured output via response_schema kwarg.
+    Also works with vLLM's OpenAI-compatible API (pass api_key and
+    set OPENAI_BASE_URL or use openai.OpenAI(base_url=...)).
+    """
+    import json as _json
     import openai
     client = openai.OpenAI(api_key=api_key)
 
-    def call(system: str, user: str) -> str:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
+    def call(system: str, user: str, response_schema: dict = None):
+        kwargs = {
+            "model": model,
+            "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-        )
-        return response.choices[0].message.content
+        }
+        if response_schema:
+            kwargs["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "response",
+                    "strict": True,
+                    "schema": response_schema,
+                },
+            }
+        response = client.chat.completions.create(**kwargs)
+        content = response.choices[0].message.content
+        if response_schema:
+            return _json.loads(content)
+        return content
     return call
 
 
 def make_anthropic_llm(model: str = "claude-sonnet-4-20250514", api_key: str = None):
-    """Create an LLM callable using Anthropic's API."""
+    """Create an LLM callable using Anthropic's API.
+
+    Supports structured output via response_schema kwarg (uses tool_use).
+    """
     import anthropic
     client = anthropic.Anthropic(api_key=api_key)
 
-    def call(system: str, user: str) -> str:
-        response = client.messages.create(
-            model=model,
-            max_tokens=1024,
-            system=system,
-            messages=[{"role": "user", "content": user}],
-        )
+    def call(system: str, user: str, response_schema: dict = None):
+        kwargs = {
+            "model": model,
+            "max_tokens": 1024,
+            "system": system,
+            "messages": [{"role": "user", "content": user}],
+        }
+        if response_schema:
+            kwargs["tools"] = [{
+                "name": "structured_response",
+                "description": "Provide a structured response",
+                "input_schema": response_schema,
+            }]
+            kwargs["tool_choice"] = {
+                "type": "tool", "name": "structured_response",
+            }
+        response = client.messages.create(**kwargs)
+        if response_schema:
+            for block in response.content:
+                if block.type == "tool_use":
+                    return block.input
+            return {}
         return response.content[0].text
     return call
 
 
 def make_ollama_llm(model: str = "llama3.1", base_url: str = "http://localhost:11434"):
-    """Create an LLM callable using a local Ollama instance."""
-    import json
+    """Create an LLM callable using a local Ollama instance.
+
+    Supports structured output via response_schema kwarg.
+    """
+    import json as _json
     import urllib.request
 
-    def call(system: str, user: str) -> str:
-        data = json.dumps({
+    def call(system: str, user: str, response_schema: dict = None):
+        payload = {
             "model": model,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
             "stream": False,
-        }).encode()
+        }
+        if response_schema:
+            payload["format"] = response_schema
+        data = _json.dumps(payload).encode()
         req = urllib.request.Request(
             f"{base_url}/api/chat",
             data=data,
             headers={"Content-Type": "application/json"},
         )
         with urllib.request.urlopen(req) as resp:
-            result = json.loads(resp.read())
-        return result["message"]["content"]
+            result = _json.loads(resp.read())
+        content = result["message"]["content"]
+        if response_schema:
+            return _json.loads(content)
+        return content
+    return call
+
+
+def make_vllm_llm(model: str = "default", base_url: str = "http://localhost:8000"):
+    """Create an LLM callable using vLLM's OpenAI-compatible API.
+
+    Supports structured output via guided_json in extra_body.
+    """
+    import json as _json
+    import openai
+    client = openai.OpenAI(api_key="unused", base_url=f"{base_url}/v1")
+
+    def call(system: str, user: str, response_schema: dict = None):
+        kwargs = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        }
+        if response_schema:
+            kwargs["extra_body"] = {"guided_json": response_schema}
+        response = client.chat.completions.create(**kwargs)
+        content = response.choices[0].message.content
+        if response_schema:
+            return _json.loads(content)
+        return content
     return call
 
 
@@ -383,7 +501,15 @@ def _build_llm(args):
     elif args.llm == "anthropic":
         return make_anthropic_llm(model=args.model or "claude-sonnet-4-20250514")
     elif args.llm == "ollama":
-        return make_ollama_llm(model=args.model or "llama3.1")
+        kwargs = {"model": args.model or "llama3.1"}
+        if hasattr(args, "llm_url") and args.llm_url:
+            kwargs["base_url"] = args.llm_url
+        return make_ollama_llm(**kwargs)
+    elif args.llm == "vllm":
+        return make_vllm_llm(
+            model=args.model or "default",
+            base_url=getattr(args, "llm_url", None) or "http://localhost:8000",
+        )
     return None
 
 
@@ -421,10 +547,11 @@ if __name__ == "__main__":
     # Common args
     def add_llm_args(p):
         p.add_argument(
-            "--llm", choices=["none", "openai", "anthropic", "ollama"],
+            "--llm", choices=["none", "openai", "anthropic", "ollama", "vllm"],
             default="none", help="LLM provider (default: none)",
         )
         p.add_argument("--model", help="Model name override for LLM provider")
+        p.add_argument("--llm-url", help="Base URL for vLLM or Ollama server")
 
     # transform (default when no subcommand)
     t_parser = subparsers.add_parser("transform", help="Full pipeline: analyze -> detect -> generate -> validate")

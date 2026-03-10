@@ -96,12 +96,41 @@ result = skills["transform"]("/path/to/quickstart")
 Any function matching this signature works as an LLM:
 
 ```python
-def my_llm(system: str, user: str) -> str:
-    """Send system prompt + user message, return response text."""
+def my_llm(system: str, user: str, response_schema: dict = None) -> str | dict:
+    """Send system prompt + user message, return response.
+
+    When response_schema is provided, return a parsed dict matching
+    the JSON schema. When absent, return a plain text string.
+    """
     ...
 ```
 
-Built-in adapters: `make_openai_llm()`, `make_anthropic_llm()`, `make_ollama_llm()`
+Built-in adapters with structured output support:
+
+| Adapter | Structured Output Method |
+|---------|-------------------------|
+| `make_openai_llm()` | `response_format` with JSON schema |
+| `make_anthropic_llm()` | `tool_use` with forced tool choice |
+| `make_ollama_llm()` | `format` parameter with JSON schema |
+| `make_vllm_llm()` | `guided_json` via `extra_body` |
+
+All hooks fall back to text parsing if the adapter doesn't support
+structured output or returns a string.
+
+### vLLM Example
+
+```python
+from skills.transform_quickstart import make_vllm_llm
+
+llm = make_vllm_llm(model="meta-llama/Llama-3.1-8B-Instruct",
+                     base_url="http://localhost:8000")
+result = transform("/path/to/quickstart", llm=llm)
+```
+
+```bash
+python skills/transform_quickstart.py transform /path/to/quickstart \
+  --llm vllm --model meta-llama/Llama-3.1-8B-Instruct --llm-url http://localhost:8000
+```
 
 ## Environment Variables
 
@@ -109,4 +138,4 @@ When using LLM adapters:
 
 - `OPENAI_API_KEY` — for OpenAI adapter
 - `ANTHROPIC_API_KEY` — for Anthropic adapter
-- Ollama requires no API key (local)
+- Ollama and vLLM require no API key (local)

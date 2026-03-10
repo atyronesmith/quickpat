@@ -26,7 +26,7 @@ from typing import Callable, Optional
 import yaml
 
 
-LLMCallable = Callable[[str, str], str]
+LLMCallable = Callable
 
 
 @dataclass
@@ -418,6 +418,32 @@ If everything is valid, respond with exactly: VALID
 """
 
 
+VALIDATION_REVIEW_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "valid": {"type": "boolean", "description": "Whether the pattern is valid"},
+        "issues": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "file": {"type": "string"},
+                    "severity": {
+                        "type": "string",
+                        "enum": ["error", "warning"],
+                    },
+                    "message": {"type": "string"},
+                },
+                "required": ["file", "severity", "message"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["valid", "issues"],
+    "additionalProperties": False,
+}
+
+
 def _llm_review(out: Path, llm: LLMCallable) -> list:
     """Ask the LLM to review generated files against the validation checklist."""
     # Gather file contents
@@ -434,10 +460,42 @@ def _llm_review(out: Path, llm: LLMCallable) -> list:
     user_msg = "Review these pattern files:\n\n" + "\n\n".join(files_content)
 
     try:
-        response = llm(VALIDATION_CHECKLIST, user_msg).strip()
+        result = llm(
+            VALIDATION_CHECKLIST, user_msg,
+            response_schema=VALIDATION_REVIEW_SCHEMA,
+        )
     except Exception as e:
         return [Issue("", "warning", f"LLM review failed: {e}")]
 
+    # Structured output: result is a dict
+    if isinstance(result, dict):
+        return _parse_structured_review(result)
+
+    # Fallback: text parsing for adapters without structured output
+    return _parse_text_review(result)
+
+
+def _parse_structured_review(data: dict) -> list:
+    """Parse structured validation review response."""
+    if data.get("valid") and not data.get("issues"):
+        return []
+
+    issues = []
+    for item in data.get("issues", []):
+        severity = item.get("severity", "warning")
+        if severity not in ("error", "warning"):
+            severity = "warning"
+        issues.append(Issue(
+            file=item.get("file", ""),
+            severity=severity,
+            message=f"[LLM] {item.get('message', '')}",
+        ))
+    return issues
+
+
+def _parse_text_review(response: str) -> list:
+    """Parse free-text validation review response (fallback)."""
+    response = response.strip()
     if response == "VALID":
         return []
 
@@ -457,7 +515,6 @@ def _llm_review(out: Path, llm: LLMCallable) -> list:
                 severity=severity,
                 message=f"[LLM] {description.strip()}",
             ))
-
     return issues
 
 
@@ -762,10 +819,11 @@ if __name__ == "__main__":
     parser.add_argument("path", help="Path to pattern directory")
     parser.add_argument("--fix", action="store_true", help="Auto-fix issues")
     parser.add_argument(
-        "--llm", choices=["none", "openai", "anthropic", "ollama"],
+        "--llm", choices=["none", "openai", "anthropic", "ollama", "vllm"],
         default="none", help="LLM provider for semantic review",
     )
     parser.add_argument("--model", help="Model name override for LLM provider")
+    parser.add_argument("--llm-url", help="Base URL for vLLM or Ollama server")
     parser.add_argument(
         "--max-iterations", type=int, default=3,
         help="Max fix iterations (default: 3)",
@@ -774,13 +832,23 @@ if __name__ == "__main__":
 
     llm_callable = None
     if args.llm != "none":
-        from transform_quickstart import make_openai_llm, make_anthropic_llm, make_ollama_llm
+        from transform_quickstart import (
+            make_openai_llm, make_anthropic_llm, make_ollama_llm, make_vllm_llm,
+        )
         if args.llm == "openai":
             llm_callable = make_openai_llm(model=args.model or "gpt-4o-mini")
         elif args.llm == "anthropic":
             llm_callable = make_anthropic_llm(model=args.model or "claude-sonnet-4-20250514")
         elif args.llm == "ollama":
-            llm_callable = make_ollama_llm(model=args.model or "llama3.1")
+            kwargs = {"model": args.model or "llama3.1"}
+            if args.llm_url:
+                kwargs["base_url"] = args.llm_url
+            llm_callable = make_ollama_llm(**kwargs)
+        elif args.llm == "vllm":
+            llm_callable = make_vllm_llm(
+                model=args.model or "default",
+                base_url=args.llm_url or "http://localhost:8000",
+            )
 
     if args.fix:
         result = validate_and_fix(
