@@ -113,6 +113,7 @@ Built-in adapters with structured output support:
 | `make_anthropic_llm()` | `tool_use` with forced tool choice |
 | `make_ollama_llm()` | `format` parameter with JSON schema |
 | `make_vllm_llm()` | `guided_json` via `extra_body` |
+| `make_deepinfra_llm()` | `response_format` with JSON schema |
 
 All hooks fall back to text parsing if the adapter doesn't support
 structured output or returns a string.
@@ -138,4 +139,5 @@ When using LLM adapters:
 
 - `OPENAI_API_KEY` — for OpenAI adapter
 - `ANTHROPIC_API_KEY` — for Anthropic adapter
+- `DEEPINFRA_API_KEY` — for DeepInfra adapter
 - Ollama and vLLM require no API key (local)

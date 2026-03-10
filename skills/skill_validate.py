@@ -819,7 +819,7 @@ if __name__ == "__main__":
     parser.add_argument("path", help="Path to pattern directory")
     parser.add_argument("--fix", action="store_true", help="Auto-fix issues")
     parser.add_argument(
-        "--llm", choices=["none", "openai", "anthropic", "ollama", "vllm"],
+        "--llm", choices=["none", "openai", "anthropic", "ollama", "vllm", "deepinfra"],
         default="none", help="LLM provider for semantic review",
     )
     parser.add_argument("--model", help="Model name override for LLM provider")
@@ -833,7 +833,8 @@ if __name__ == "__main__":
     llm_callable = None
     if args.llm != "none":
         from transform_quickstart import (
-            make_openai_llm, make_anthropic_llm, make_ollama_llm, make_vllm_llm,
+            make_openai_llm, make_anthropic_llm, make_ollama_llm,
+            make_vllm_llm, make_deepinfra_llm,
         )
         if args.llm == "openai":
             llm_callable = make_openai_llm(model=args.model or "gpt-4o-mini")
@@ -848,6 +849,10 @@ if __name__ == "__main__":
             llm_callable = make_vllm_llm(
                 model=args.model or "default",
                 base_url=args.llm_url or "http://localhost:8000",
+            )
+        elif args.llm == "deepinfra":
+            llm_callable = make_deepinfra_llm(
+                model=args.model or "Qwen/Qwen2.5-72B-Instruct",
             )
 
     if args.fix:

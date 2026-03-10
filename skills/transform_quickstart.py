@@ -492,6 +492,55 @@ def make_vllm_llm(model: str = "default", base_url: str = "http://localhost:8000
     return call
 
 
+def make_deepinfra_llm(
+    model: str = "Qwen/Qwen2.5-72B-Instruct",
+    api_key: str = None,
+):
+    """Create an LLM callable using DeepInfra's OpenAI-compatible API.
+
+    Supports structured output via response_format with JSON schema.
+    Uses DEEPINFRA_API_KEY env var if api_key not provided.
+    Model names use HuggingFace format (e.g. Qwen/Qwen2.5-72B-Instruct).
+    """
+    import json as _json
+    import os
+    import openai
+
+    key = api_key or os.environ.get("DEEPINFRA_API_KEY")
+    if not key:
+        raise ValueError(
+            "DeepInfra API key required. Set DEEPINFRA_API_KEY env var "
+            "or pass api_key parameter."
+        )
+    client = openai.OpenAI(
+        api_key=key,
+        base_url="https://api.deepinfra.com/v1/openai",
+    )
+
+    def call(system: str, user: str, response_schema: dict = None):
+        kwargs = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        }
+        if response_schema:
+            kwargs["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "response",
+                    "schema": response_schema,
+                },
+            }
+        response = client.chat.completions.create(**kwargs)
+        content = response.choices[0].message.content
+        if response_schema:
+            return _json.loads(content)
+        return content
+    return call
+
+
 # ── CLI ─────────────────────────────────────────────────────────────
 
 
@@ -510,6 +559,8 @@ def _build_llm(args):
             model=args.model or "default",
             base_url=getattr(args, "llm_url", None) or "http://localhost:8000",
         )
+    elif args.llm == "deepinfra":
+        return make_deepinfra_llm(model=args.model or "Qwen/Qwen2.5-72B-Instruct")
     return None
 
 
@@ -547,7 +598,7 @@ if __name__ == "__main__":
     # Common args
     def add_llm_args(p):
         p.add_argument(
-            "--llm", choices=["none", "openai", "anthropic", "ollama", "vllm"],
+            "--llm", choices=["none", "openai", "anthropic", "ollama", "vllm", "deepinfra"],
             default="none", help="LLM provider (default: none)",
         )
         p.add_argument("--model", help="Model name override for LLM provider")
