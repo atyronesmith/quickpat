@@ -8,6 +8,7 @@ from pathlib import Path
 
 from . import __version__
 from .analyzer import QuickstartAnalyzer
+from .config import get as cfg
 from .generator import PatternGenerator, build_report
 from .operators import OPERATORS
 from .registry import (
@@ -24,9 +25,10 @@ def main():
     parser.add_argument(
         '--version', action='version', version=f'%(prog)s {__version__}'
     )
+    default_patterns_dir = str(Path(cfg("pattern.output_dir", "~/patterns")).expanduser())
     parser.add_argument(
-        '--patterns-dir', default=str(Path.home() / 'patterns'),
-        help='Root directory for generated patterns (default: ~/patterns)',
+        '--patterns-dir', default=default_patterns_dir,
+        help=f'Root directory for generated patterns (default: {default_patterns_dir})',
     )
 
     subparsers = parser.add_subparsers(dest='command', required=True)
@@ -301,7 +303,7 @@ def interactive_config(analysis, args):
     )
     config['output_dir'] = ask("Output directory", default_output)
 
-    config['clustergroup_version'] = '0.9.*'
+    config['clustergroup_version'] = cfg("pattern.clustergroup_version", "0.9.*")
 
     return config
 

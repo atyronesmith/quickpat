@@ -1,0 +1,72 @@
+# QuickPat Configuration
+#
+# Copy this file to quickpat.yaml and edit as needed.
+# Alternatively, place at ~/.config/quickpat/config.yaml for user-level config.
+#
+# Environment variables (OPENAI_API_KEY, ANTHROPIC_API_KEY, DEEPINFRA_API_KEY)
+# override the corresponding api_key values below.
+
+# ── LLM Provider ────────────────────────────────────────────────────
+llm:
+  # Default provider: none, openai, anthropic, ollama, vllm, deepinfra
+  provider: none
+
+  openai:
+    api_key: ""
+    model: gpt-4o-mini
+
+  anthropic:
+    api_key: ""
+    model: claude-sonnet-4-20250514
+
+  ollama:
+    model: llama3.1
+    base_url: http://localhost:11434
+
+  vllm:
+    model: default
+    base_url: http://localhost:8000
+
+  deepinfra:
+    api_key: ""
+    model: Qwen/Qwen2.5-72B-Instruct
+
+# ── Pattern Generation ──────────────────────────────────────────────
+pattern:
+  # Root directory for generated patterns
+  output_dir: ~/patterns
+
+  # Chart strategy: "local" copies charts into the pattern repo,
+  # "external" references them from a Helm repository URL
+  chart_strategy: local
+
+  # Validated Patterns clustergroup chart version
+  clustergroup_version: "0.9.*"
+
+# ── Infrastructure Chart Versions ───────────────────────────────────
+infrastructure:
+  vault_chart_version: "0.1.*"
+  external_secrets_chart_version: "0.2.*"
+
+# ── Registry URLs ───────────────────────────────────────────────────
+registry:
+  # AI Quickstart registry (fetches .gitmodules for quickpat list)
+  quickstart_url: https://raw.githubusercontent.com/rh-ai-quickstart/ai-quickstart-pub/main/.gitmodules
+
+  # Shared chart repo index (for freshness checks and fork detection)
+  chart_repo_index_url: https://rh-ai-quickstart.github.io/ai-architecture-charts/index.yaml
+
+  # GitHub org base URL for quickstart repos
+  github_base: https://github.com/rh-ai-quickstart
+
+  # HTTP timeout in seconds for registry fetches
+  timeout: 10
+
+# ── Platform Overrides ──────────────────────────────────────────────
+# Override files generated under overrides/ for each platform
+platforms:
+  - AWS
+  - Azure
+  - GCP
+  - IBMCloud
+  - None

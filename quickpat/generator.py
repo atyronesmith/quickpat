@@ -6,6 +6,7 @@ from pathlib import Path
 import yaml
 
 from .analyzer import QuickstartAnalysis, ChartInfo
+from .config import get as cfg
 from .operators import OPERATORS
 
 
@@ -55,7 +56,8 @@ class PatternGenerator:
                 'multiSourceConfig': {
                     'enabled': True,
                     'clusterGroupChartVersion': self.config.get(
-                        'clustergroup_version', '0.9.*'
+                        'clustergroup_version',
+                        cfg("pattern.clustergroup_version", "0.9.*"),
                     ),
                 },
             },
@@ -175,14 +177,18 @@ class PatternGenerator:
                 'namespace': 'vault',
                 'project': 'hub',
                 'chart': 'hashicorp-vault',
-                'chartVersion': '0.1.*',
+                'chartVersion': cfg(
+                    "infrastructure.vault_chart_version", "0.1.*"
+                ),
             }
             applications['golang-external-secrets'] = {
                 'name': 'golang-external-secrets',
                 'namespace': 'golang-external-secrets',
                 'project': 'hub',
                 'chart': 'golang-external-secrets',
-                'chartVersion': '0.2.*',
+                'chartVersion': cfg(
+                    "infrastructure.external_secrets_chart_version", "0.2.*"
+                ),
             }
 
         # Application chart(s)
@@ -509,7 +515,7 @@ podman run -it --rm --pull=newer \
         overrides_dir.mkdir(exist_ok=True)
 
         # Platform override placeholders referenced by sharedValueFiles
-        for platform in ('AWS', 'Azure', 'GCP', 'IBMCloud', 'None'):
+        for platform in cfg("platforms", ["AWS", "Azure", "GCP", "IBMCloud", "None"]):
             path = overrides_dir / f'values-{platform}.yaml'
             if not path.exists():
                 path.write_text(

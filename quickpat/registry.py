@@ -5,26 +5,20 @@ import urllib.request
 
 import yaml
 
-REGISTRY_URL = (
-    "https://raw.githubusercontent.com/rh-ai-quickstart/"
-    "ai-quickstart-pub/main/.gitmodules"
-)
-
-CHART_REPO_INDEX_URL = (
-    "https://rh-ai-quickstart.github.io/ai-architecture-charts/index.yaml"
-)
-
-GITHUB_BASE = "https://github.com/rh-ai-quickstart"
+from .config import get as cfg
 
 
-def fetch_registry(url: str = REGISTRY_URL) -> list:
+def fetch_registry(url: str = None) -> list:
     """Fetch and parse the .gitmodules file from ai-quickstart-pub.
 
     Returns a list of dicts with 'name' and 'url' keys.
     """
+    if url is None:
+        url = cfg("registry.quickstart_url")
+    timeout = cfg("registry.timeout", 10)
     try:
         req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             content = resp.read().decode()
     except Exception as e:
         raise RuntimeError(f"Failed to fetch registry: {e}")
@@ -101,14 +95,17 @@ def resolve_name(name: str, registry: list = None) -> str:
 # ── Shared chart index ───────────────────────────────────────────
 
 
-def fetch_chart_index(url: str = CHART_REPO_INDEX_URL) -> dict:
+def fetch_chart_index(url: str = None) -> dict:
     """Fetch the ai-architecture-charts Helm repo index.
 
     Returns a dict mapping chart name to latest version string.
     """
+    if url is None:
+        url = cfg("registry.chart_repo_index_url")
+    timeout = cfg("registry.timeout", 10)
     try:
         req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             index = yaml.safe_load(resp.read())
     except Exception as e:
         raise RuntimeError(f"Failed to fetch chart index: {e}")

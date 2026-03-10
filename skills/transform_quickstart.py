@@ -40,6 +40,7 @@ from typing import Callable, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from quickpat.analyzer import QuickstartAnalyzer, QuickstartAnalysis
+from quickpat.config import get as cfg
 from quickpat.generator import PatternGenerator, build_report
 from quickpat.operators import OPERATORS
 
@@ -188,7 +189,8 @@ def transform(
     if not pattern_name:
         pattern_name = f"{analysis.name}-pattern"
     if not output_dir:
-        output_dir = str(Path.home() / "patterns" / pattern_name)
+        base = Path(cfg("pattern.output_dir", "~/patterns")).expanduser()
+        output_dir = str(base / pattern_name)
     result.pattern_dir = output_dir
 
     # 3. Detect (with optional LLM)
@@ -211,7 +213,7 @@ def transform(
         "chart_strategy": chart_strategy,
         "use_vault": use_vault,
         "output_dir": output_dir,
-        "clustergroup_version": "0.9.*",
+        "clustergroup_version": cfg("pattern.clustergroup_version", "0.9.*"),
     }
     result.config = config
 
@@ -353,7 +355,7 @@ def _list_created_files(output_dir: str, config: dict) -> list:
                     files.append(f"charts/all/{d.name}/")
         else:
             files.append(f"charts/all/{config.get('app_name', 'app')}/")
-    for platform in ("AWS", "Azure", "GCP", "IBMCloud", "None"):
+    for platform in cfg("platforms", ["AWS", "Azure", "GCP", "IBMCloud", "None"]):
         files.append(f"overrides/values-{platform}.yaml")
     return files
 
@@ -361,7 +363,7 @@ def _list_created_files(output_dir: str, config: dict) -> list:
 # ── LLM adapters ────────────────────────────────────────────────────
 
 
-def make_openai_llm(model: str = "gpt-4o-mini", api_key: str = None):
+def make_openai_llm(model: str = None, api_key: str = None):
     """Create an LLM callable using OpenAI's API.
 
     Supports structured output via response_schema kwarg.
@@ -370,6 +372,8 @@ def make_openai_llm(model: str = "gpt-4o-mini", api_key: str = None):
     """
     import json as _json
     import openai
+    model = model or cfg("llm.openai.model", "gpt-4o-mini")
+    api_key = api_key or cfg("llm.openai.api_key") or None
     client = openai.OpenAI(api_key=api_key)
 
     def call(system: str, user: str, response_schema: dict = None):
@@ -397,12 +401,14 @@ def make_openai_llm(model: str = "gpt-4o-mini", api_key: str = None):
     return call
 
 
-def make_anthropic_llm(model: str = "claude-sonnet-4-20250514", api_key: str = None):
+def make_anthropic_llm(model: str = None, api_key: str = None):
     """Create an LLM callable using Anthropic's API.
 
     Supports structured output via response_schema kwarg (uses tool_use).
     """
     import anthropic
+    model = model or cfg("llm.anthropic.model", "claude-sonnet-4-20250514")
+    api_key = api_key or cfg("llm.anthropic.api_key") or None
     client = anthropic.Anthropic(api_key=api_key)
 
     def call(system: str, user: str, response_schema: dict = None):
@@ -431,13 +437,15 @@ def make_anthropic_llm(model: str = "claude-sonnet-4-20250514", api_key: str = N
     return call
 
 
-def make_ollama_llm(model: str = "llama3.1", base_url: str = "http://localhost:11434"):
+def make_ollama_llm(model: str = None, base_url: str = None):
     """Create an LLM callable using a local Ollama instance.
 
     Supports structured output via response_schema kwarg.
     """
     import json as _json
     import urllib.request
+    model = model or cfg("llm.ollama.model", "llama3.1")
+    base_url = base_url or cfg("llm.ollama.base_url", "http://localhost:11434")
 
     def call(system: str, user: str, response_schema: dict = None):
         payload = {
@@ -465,13 +473,15 @@ def make_ollama_llm(model: str = "llama3.1", base_url: str = "http://localhost:1
     return call
 
 
-def make_vllm_llm(model: str = "default", base_url: str = "http://localhost:8000"):
+def make_vllm_llm(model: str = None, base_url: str = None):
     """Create an LLM callable using vLLM's OpenAI-compatible API.
 
     Supports structured output via guided_json in extra_body.
     """
     import json as _json
     import openai
+    model = model or cfg("llm.vllm.model", "default")
+    base_url = base_url or cfg("llm.vllm.base_url", "http://localhost:8000")
     client = openai.OpenAI(api_key="unused", base_url=f"{base_url}/v1")
 
     def call(system: str, user: str, response_schema: dict = None):
@@ -492,21 +502,19 @@ def make_vllm_llm(model: str = "default", base_url: str = "http://localhost:8000
     return call
 
 
-def make_deepinfra_llm(
-    model: str = "Qwen/Qwen2.5-72B-Instruct",
-    api_key: str = None,
-):
+def make_deepinfra_llm(model: str = None, api_key: str = None):
     """Create an LLM callable using DeepInfra's OpenAI-compatible API.
 
     Supports structured output via response_format with JSON schema.
-    Uses DEEPINFRA_API_KEY env var if api_key not provided.
+    Uses DEEPINFRA_API_KEY env var or config file if api_key not provided.
     Model names use HuggingFace format (e.g. Qwen/Qwen2.5-72B-Instruct).
     """
     import json as _json
     import os
     import openai
 
-    key = api_key or os.environ.get("DEEPINFRA_API_KEY")
+    model = model or cfg("llm.deepinfra.model", "Qwen/Qwen2.5-72B-Instruct")
+    key = api_key or cfg("llm.deepinfra.api_key") or os.environ.get("DEEPINFRA_API_KEY")
     if not key:
         raise ValueError(
             "DeepInfra API key required. Set DEEPINFRA_API_KEY env var "
@@ -545,22 +553,18 @@ def make_deepinfra_llm(
 
 
 def _build_llm(args):
+    model = args.model or None  # None = use config default
+    url = getattr(args, "llm_url", None)
     if args.llm == "openai":
-        return make_openai_llm(model=args.model or "gpt-4o-mini")
+        return make_openai_llm(model=model)
     elif args.llm == "anthropic":
-        return make_anthropic_llm(model=args.model or "claude-sonnet-4-20250514")
+        return make_anthropic_llm(model=model)
     elif args.llm == "ollama":
-        kwargs = {"model": args.model or "llama3.1"}
-        if hasattr(args, "llm_url") and args.llm_url:
-            kwargs["base_url"] = args.llm_url
-        return make_ollama_llm(**kwargs)
+        return make_ollama_llm(model=model, base_url=url)
     elif args.llm == "vllm":
-        return make_vllm_llm(
-            model=args.model or "default",
-            base_url=getattr(args, "llm_url", None) or "http://localhost:8000",
-        )
+        return make_vllm_llm(model=model, base_url=url)
     elif args.llm == "deepinfra":
-        return make_deepinfra_llm(model=args.model or "Qwen/Qwen2.5-72B-Instruct")
+        return make_deepinfra_llm(model=model)
     return None
 
 

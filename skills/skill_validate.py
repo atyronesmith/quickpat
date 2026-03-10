@@ -25,6 +25,8 @@ from typing import Callable, Optional
 
 import yaml
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from quickpat.config import get as cfg
 
 LLMCallable = Callable
 
@@ -360,7 +362,7 @@ def _check_overrides(out: Path) -> list:
         ))
         return issues
 
-    for platform in ("AWS", "Azure", "GCP", "IBMCloud", "None"):
+    for platform in cfg("platforms", ["AWS", "Azure", "GCP", "IBMCloud", "None"]):
         pf = overrides / f"values-{platform}.yaml"
         if not pf.exists():
             issues.append(Issue(
@@ -625,7 +627,7 @@ def _fix_chart_version(path: Path) -> bool:
     if not data or "main" not in data:
         return False
     msc = data["main"].setdefault("multiSourceConfig", {})
-    msc.setdefault("clusterGroupChartVersion", "0.9.*")
+    msc.setdefault("clusterGroupChartVersion", cfg("pattern.clustergroup_version", "0.9.*"))
     _save_yaml(path, data, doc_start=True)
     return True
 
@@ -727,8 +729,14 @@ def _fix_infra_app_chart(path: Path, message: str) -> bool:
         return False
 
     infra_charts = {
-        "vault": {"chart": "hashicorp-vault", "chartVersion": "0.1.*"},
-        "golang-external-secrets": {"chart": "golang-external-secrets", "chartVersion": "0.2.*"},
+        "vault": {
+            "chart": "hashicorp-vault",
+            "chartVersion": cfg("infrastructure.vault_chart_version", "0.1.*"),
+        },
+        "golang-external-secrets": {
+            "chart": "golang-external-secrets",
+            "chartVersion": cfg("infrastructure.external_secrets_chart_version", "0.2.*"),
+        },
     }
 
     apps = data.get("clusterGroup", {}).get("applications", {})
@@ -750,7 +758,7 @@ def _fix_overrides(out: Path, issue: Issue) -> bool:
 
     if "directory" in issue.message:
         # Create all platform files
-        for platform in ("AWS", "Azure", "GCP", "IBMCloud", "None"):
+        for platform in cfg("platforms", ["AWS", "Azure", "GCP", "IBMCloud", "None"]):
             pf = overrides / f"values-{platform}.yaml"
             if not pf.exists():
                 pf.write_text(f"# Platform-specific overrides for {platform}\n")
@@ -836,24 +844,18 @@ if __name__ == "__main__":
             make_openai_llm, make_anthropic_llm, make_ollama_llm,
             make_vllm_llm, make_deepinfra_llm,
         )
+        model = args.model or None
+        url = getattr(args, "llm_url", None)
         if args.llm == "openai":
-            llm_callable = make_openai_llm(model=args.model or "gpt-4o-mini")
+            llm_callable = make_openai_llm(model=model)
         elif args.llm == "anthropic":
-            llm_callable = make_anthropic_llm(model=args.model or "claude-sonnet-4-20250514")
+            llm_callable = make_anthropic_llm(model=model)
         elif args.llm == "ollama":
-            kwargs = {"model": args.model or "llama3.1"}
-            if args.llm_url:
-                kwargs["base_url"] = args.llm_url
-            llm_callable = make_ollama_llm(**kwargs)
+            llm_callable = make_ollama_llm(model=model, base_url=url)
         elif args.llm == "vllm":
-            llm_callable = make_vllm_llm(
-                model=args.model or "default",
-                base_url=args.llm_url or "http://localhost:8000",
-            )
+            llm_callable = make_vllm_llm(model=model, base_url=url)
         elif args.llm == "deepinfra":
-            llm_callable = make_deepinfra_llm(
-                model=args.model or "Qwen/Qwen2.5-72B-Instruct",
-            )
+            llm_callable = make_deepinfra_llm(model=model)
 
     if args.fix:
         result = validate_and_fix(
