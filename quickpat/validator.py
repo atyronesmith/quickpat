@@ -1,32 +1,21 @@
-"""
-Sub-skill: Validate a Validated Pattern
+"""Validate a Validated Pattern directory.
 
 Runs deterministic structural checks and optional LLM-powered semantic
 review with a self-correcting fix loop.
 
 Usage:
-    # Deterministic only
-    from skills.skill_validate import validate
+    from quickpat.validator import validate, validate_and_fix
     result = validate("/path/to/pattern")
-
-    # With LLM review + auto-fix loop
-    from skills.skill_validate import validate_and_fix
     result = validate_and_fix("/path/to/pattern", llm=my_llm)
-
-    # CLI
-    python skills/skill_validate.py /path/to/pattern
-    python skills/skill_validate.py /path/to/pattern --llm ollama --fix
 """
 
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
 import yaml
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from quickpat.config import get as cfg
+from .config import get as cfg
 
 LLMCallable = Callable
 
@@ -101,7 +90,7 @@ def validate_and_fix(
         fixed = _apply_fixes(Path(pattern_dir), fixable)
         total_fixes += fixed
         if fixed == 0:
-            break  # nothing was actually fixed, stop looping
+            break
 
     result.fixes_applied = total_fixes
     return result
@@ -130,16 +119,14 @@ def _check_values_global(out: Path) -> list:
     issues = []
     path = out / "values-global.yaml"
     if not path.exists():
-        return issues  # already caught by file structure check
+        return issues
 
     data = _load_yaml(path)
     if not data:
         issues.append(Issue("values-global.yaml", "error", "File is empty or invalid YAML"))
         return issues
 
-    # main: must be at root level
     if "main" not in data:
-        # Check if it's incorrectly nested under global:
         global_data = data.get("global", {})
         if isinstance(global_data, dict) and "main" in global_data:
             issues.append(Issue(
@@ -190,14 +177,12 @@ def _check_values_hub(out: Path, config: dict = None) -> list:
         issues.append(Issue("values-hub.yaml", "error", "Missing clusterGroup: key"))
         return issues
 
-    # projects must be a list
     projects = cg.get("projects")
     if projects is None:
         issues.append(Issue("values-hub.yaml", "warning", "Missing projects: key"))
     elif not isinstance(projects, list):
         issues.append(Issue("values-hub.yaml", "error", "projects: must be a list"))
 
-    # sharedValueFiles
     svf = cg.get("sharedValueFiles")
     if not svf:
         issues.append(Issue(
@@ -206,7 +191,6 @@ def _check_values_hub(out: Path, config: dict = None) -> list:
             auto_fixable=True,
         ))
 
-    # subscriptions must be a dict
     subs = cg.get("subscriptions")
     if subs is not None and not isinstance(subs, dict):
         issues.append(Issue(
@@ -214,10 +198,8 @@ def _check_values_hub(out: Path, config: dict = None) -> list:
             "subscriptions: must be a dict (not a list)",
         ))
 
-    # applications check
     apps = cg.get("applications", {})
 
-    # Infrastructure apps: vault and external-secrets should use chart:, not path:
     for infra_app in ("vault", "golang-external-secrets"):
         if infra_app in apps:
             app = apps[infra_app]
@@ -228,7 +210,6 @@ def _check_values_hub(out: Path, config: dict = None) -> list:
                     auto_fixable=True,
                 ))
 
-    # Application chart: should use path: (local) or repoURL: (external)
     for app_name, app in apps.items():
         if app_name in ("vault", "golang-external-secrets"):
             continue
@@ -239,7 +220,6 @@ def _check_values_hub(out: Path, config: dict = None) -> list:
                 "values-hub.yaml", "warning",
                 f"App '{app_name}' has neither path: nor repoURL:/chart:",
             ))
-        # Local chart path should be charts/all/
         if has_path and not app["path"].startswith("charts/all/"):
             issues.append(Issue(
                 "values-hub.yaml", "error",
@@ -254,14 +234,13 @@ def _check_values_secret(out: Path) -> list:
     issues = []
     path = out / "values-secret.yaml.template"
     if not path.exists():
-        return issues  # optional file
+        return issues
 
     data = _load_yaml(path)
     if not data:
         issues.append(Issue("values-secret.yaml.template", "error", "File is empty or invalid YAML"))
         return issues
 
-    # version must be "2.0"
     version = data.get("version")
     if version is None:
         issues.append(Issue(
@@ -276,9 +255,7 @@ def _check_values_secret(out: Path) -> list:
             auto_fixable=True,
         ))
 
-    # Check each secret entry
     for secret in data.get("secrets", []):
-        # Must use vaultPrefixes (plural, list), not vaultPrefixOverride
         if "vaultPrefixOverride" in secret:
             issues.append(Issue(
                 "values-secret.yaml.template", "error",
@@ -448,7 +425,6 @@ VALIDATION_REVIEW_SCHEMA = {
 
 def _llm_review(out: Path, llm: LLMCallable) -> list:
     """Ask the LLM to review generated files against the validation checklist."""
-    # Gather file contents
     files_content = []
     for fname in ("values-global.yaml", "values-hub.yaml", "values-secret.yaml.template", "Makefile"):
         fpath = out / fname
@@ -469,11 +445,9 @@ def _llm_review(out: Path, llm: LLMCallable) -> list:
     except Exception as e:
         return [Issue("", "warning", f"LLM review failed: {e}")]
 
-    # Structured output: result is a dict
     if isinstance(result, dict):
         return _parse_structured_review(result)
 
-    # Fallback: text parsing for adapters without structured output
     return _parse_text_review(result)
 
 
@@ -541,52 +515,40 @@ def _apply_fixes(out: Path, issues: list) -> int:
 def _try_fix(out: Path, issue: Issue) -> bool:
     """Attempt to fix a single issue. Returns True if fixed."""
 
-    # values-global.yaml: main nested under global
     if issue.file == "values-global.yaml" and "nested under global" in issue.message:
         return _fix_main_nesting(out / "values-global.yaml")
 
-    # values-global.yaml: multiSourceConfig not enabled
     if issue.file == "values-global.yaml" and "multiSourceConfig.enabled" in issue.message:
         return _fix_multisource_enabled(out / "values-global.yaml")
 
-    # values-global.yaml: missing clusterGroupChartVersion
     if issue.file == "values-global.yaml" and "clusterGroupChartVersion" in issue.message:
         return _fix_chart_version(out / "values-global.yaml")
 
-    # values-secret: missing or wrong version
     if issue.file == "values-secret.yaml.template" and "version" in issue.message.lower():
         return _fix_secret_version(out / "values-secret.yaml.template")
 
-    # values-secret: vaultPrefixOverride -> vaultPrefixes
     if issue.file == "values-secret.yaml.template" and "vaultPrefixOverride" in issue.message:
         return _fix_vault_prefix(out / "values-secret.yaml.template")
 
-    # values-secret: vaultPrefixes not a list
     if issue.file == "values-secret.yaml.template" and "vaultPrefixes must be a list" in issue.message:
         return _fix_vault_prefix_type(out / "values-secret.yaml.template")
 
-    # Makefile: wrong include
     if issue.file == "Makefile" and "common/Makefile" in issue.message:
         return _fix_makefile_include(out / "Makefile")
 
-    # pattern.sh not executable
     if issue.file == "pattern.sh" and "not executable" in issue.message:
         (out / "pattern.sh").chmod(0o755)
         return True
 
-    # values-hub.yaml: chart path not charts/all/
     if issue.file == "values-hub.yaml" and "charts/all/" in issue.message:
         return _fix_chart_path(out / "values-hub.yaml")
 
-    # values-hub.yaml: missing sharedValueFiles
     if issue.file == "values-hub.yaml" and "sharedValueFiles" in issue.message:
         return _fix_shared_value_files(out / "values-hub.yaml")
 
-    # values-hub.yaml: infra app uses path instead of chart
     if issue.file == "values-hub.yaml" and "should use chart:" in issue.message:
         return _fix_infra_app_chart(out / "values-hub.yaml", issue.message)
 
-    # Missing overrides directory or files
     if "overrides/" in issue.file or "overrides/ directory" in issue.message:
         return _fix_overrides(out, issue)
 
@@ -594,15 +556,12 @@ def _try_fix(out: Path, issue: Issue) -> bool:
 
 
 def _fix_main_nesting(path: Path) -> bool:
-    """Move main: from under global: to root level."""
     data = _load_yaml(path)
     if not data:
         return False
-
     global_data = data.get("global", {})
     if not isinstance(global_data, dict) or "main" not in global_data:
         return False
-
     main_data = global_data.pop("main")
     data["main"] = main_data
     _save_yaml(path, data, doc_start=True)
@@ -686,7 +645,6 @@ def _fix_makefile_include(path: Path) -> bool:
 
 
 def _fix_chart_path(path: Path) -> bool:
-    """Fix application chart paths from charts/hub/ to charts/all/."""
     data = _load_yaml(path)
     if not data:
         return False
@@ -697,7 +655,6 @@ def _fix_chart_path(path: Path) -> bool:
             continue
         p = app.get("path", "")
         if p and not p.startswith("charts/all/"):
-            # Replace charts/hub/ or charts/<anything>/ with charts/all/
             parts = p.split("/")
             if len(parts) >= 2 and parts[0] == "charts":
                 parts[1] = "all"
@@ -723,7 +680,6 @@ def _fix_shared_value_files(path: Path) -> bool:
 
 
 def _fix_infra_app_chart(path: Path, message: str) -> bool:
-    """Fix infrastructure apps to use chart: instead of path:."""
     data = _load_yaml(path)
     if not data:
         return False
@@ -757,14 +713,12 @@ def _fix_overrides(out: Path, issue: Issue) -> bool:
     overrides.mkdir(exist_ok=True)
 
     if "directory" in issue.message:
-        # Create all platform files
         for platform in cfg("platforms", ["AWS", "Azure", "GCP", "IBMCloud", "None"]):
             pf = overrides / f"values-{platform}.yaml"
             if not pf.exists():
                 pf.write_text(f"# Platform-specific overrides for {platform}\n")
         return True
 
-    # Individual platform file
     fname = issue.file.split("/")[-1] if "/" in issue.file else issue.file
     pf = overrides / fname
     if not pf.exists():
@@ -791,78 +745,3 @@ def _save_yaml(path: Path, data: dict, doc_start: bool = False):
         if doc_start:
             f.write("---\n")
         yaml.dump(data, f, default_flow_style=False, sort_keys=False)
-
-
-# ── CLI ─────────────────────────────────────────────────────────────
-
-
-def _print_result(result: ValidationResult):
-    if result.valid:
-        status = "VALID"
-    else:
-        status = "INVALID"
-
-    error_count = sum(1 for i in result.issues if i.severity == "error")
-    warn_count = sum(1 for i in result.issues if i.severity == "warning")
-    print(f"Status: {status} ({error_count} errors, {warn_count} warnings)")
-
-    if result.fixes_applied:
-        print(f"Auto-fixes applied: {result.fixes_applied}")
-    if result.iterations > 1:
-        print(f"Validation iterations: {result.iterations}")
-
-    for issue in result.issues:
-        marker = "ERROR" if issue.severity == "error" else "WARN "
-        fixed = " [FIXED]" if issue.fix_applied else ""
-        print(f"  {marker} {issue.file}: {issue.message}{fixed}")
-
-
-if __name__ == "__main__":
-    import argparse
-
-    # Add parent for quickpat imports (needed by LLM adapters)
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-    parser = argparse.ArgumentParser(description="Validate a Validated Pattern")
-    parser.add_argument("path", help="Path to pattern directory")
-    parser.add_argument("--fix", action="store_true", help="Auto-fix issues")
-    parser.add_argument(
-        "--llm", choices=["none", "openai", "anthropic", "ollama", "vllm", "deepinfra"],
-        default="none", help="LLM provider for semantic review",
-    )
-    parser.add_argument("--model", help="Model name override for LLM provider")
-    parser.add_argument("--llm-url", help="Base URL for vLLM or Ollama server")
-    parser.add_argument(
-        "--max-iterations", type=int, default=3,
-        help="Max fix iterations (default: 3)",
-    )
-    args = parser.parse_args()
-
-    llm_callable = None
-    if args.llm != "none":
-        from transform_quickstart import (
-            make_openai_llm, make_anthropic_llm, make_ollama_llm,
-            make_vllm_llm, make_deepinfra_llm,
-        )
-        model = args.model or None
-        url = getattr(args, "llm_url", None)
-        if args.llm == "openai":
-            llm_callable = make_openai_llm(model=model)
-        elif args.llm == "anthropic":
-            llm_callable = make_anthropic_llm(model=model)
-        elif args.llm == "ollama":
-            llm_callable = make_ollama_llm(model=model, base_url=url)
-        elif args.llm == "vllm":
-            llm_callable = make_vllm_llm(model=model, base_url=url)
-        elif args.llm == "deepinfra":
-            llm_callable = make_deepinfra_llm(model=model)
-
-    if args.fix:
-        result = validate_and_fix(
-            args.path, llm=llm_callable, max_iterations=args.max_iterations,
-        )
-    else:
-        result = validate(args.path, llm=llm_callable)
-
-    _print_result(result)
-    sys.exit(0 if result.valid else 1)

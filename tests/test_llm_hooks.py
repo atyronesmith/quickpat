@@ -1,19 +1,13 @@
 """Tests for LLM hooks with structured output."""
 
-import sys
-from pathlib import Path
-
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "skills"))
-
-from transform_quickstart import (
+from quickpat.pipeline import (
     _llm_check_operators,
     _llm_review_secrets,
     skill_analyze,
 )
-from skill_validate import _llm_review, _parse_structured_review, _parse_text_review, Issue
+from quickpat.validator import _llm_review, _parse_structured_review, _parse_text_review, Issue
 from tests.conftest import write_chart, write_values
 
 

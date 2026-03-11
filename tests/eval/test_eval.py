@@ -14,7 +14,7 @@ def test_transform(
     quickstart_name, quickstart_path, provider_name, model_name,
     llm_callable, tmp_path, eval_results_dir,
 ):
-    from transform_quickstart import transform
+    from quickpat.pipeline import transform
 
     output_dir = str(tmp_path / f"{quickstart_name}-{provider_name}")
     start = time.monotonic()

@@ -12,9 +12,8 @@ from pathlib import Path
 
 import pytest
 
-# Ensure quickpat and skills are importable
+# Ensure quickpat is importable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "skills"))
 
 from quickpat.config import get as cfg
 from quickpat.registry import fetch_registry
@@ -62,7 +61,7 @@ def _probe_local_server(base_url):
 
 def probe_providers():
     """Discover available LLM providers. 'none' is always available."""
-    from transform_quickstart import (
+    from quickpat.llm import (
         make_anthropic_llm, make_deepinfra_llm, make_ollama_llm,
         make_openai_llm, make_vllm_llm,
     )

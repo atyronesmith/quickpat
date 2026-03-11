@@ -9,12 +9,15 @@ from pathlib import Path
 from . import __version__
 from .analyzer import QuickstartAnalyzer
 from .config import get as cfg
-from .generator import PatternGenerator, build_report
+from .generator import build_report
+from .llm import make_llm
 from .operators import OPERATORS
+from .pipeline import transform, skill_analyze, TransformResult
 from .registry import (
     fetch_registry, resolve_name, check_dependency_freshness,
     detect_local_forks, fetch_chart_index,
 )
+from .validator import validate, validate_and_fix
 
 
 def main():
@@ -61,6 +64,21 @@ def main():
         '--non-interactive', action='store_true',
         help='Use defaults, skip interactive prompts',
     )
+    _add_llm_args(create_p)
+
+    # validate subcommand
+    validate_p = subparsers.add_parser(
+        'validate', help='Validate a generated pattern'
+    )
+    validate_p.add_argument('path', help='Path to pattern directory')
+    validate_p.add_argument(
+        '--fix', action='store_true', help='Auto-fix issues'
+    )
+    validate_p.add_argument(
+        '--max-iterations', type=int, default=3,
+        help='Max auto-fix iterations (default: 3)',
+    )
+    _add_llm_args(validate_p)
 
     args = parser.parse_args()
 
@@ -70,6 +88,18 @@ def main():
         cmd_analyze(args)
     elif args.command == 'create':
         cmd_create(args)
+    elif args.command == 'validate':
+        cmd_validate(args)
+
+
+def _add_llm_args(parser):
+    """Add common LLM options to a subparser."""
+    parser.add_argument(
+        '--llm', choices=['none', 'openai', 'anthropic', 'ollama', 'vllm', 'deepinfra'],
+        default='none', help='LLM provider for enhanced detection/validation',
+    )
+    parser.add_argument('--model', help='Model name override')
+    parser.add_argument('--llm-url', help='Base URL for ollama/vllm')
 
 
 def cmd_list():
@@ -145,24 +175,42 @@ def cmd_create(args):
     print("=== QuickPat: AI Quickstart -> Validated Pattern ===\n")
 
     path = resolve_path(args.path)
-    analyzer = QuickstartAnalyzer(path)
+
+    # Show analysis first
     try:
-        analysis = analyzer.analyze()
+        analysis = skill_analyze(path)
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
     print_analysis(analysis)
 
-    if args.non_interactive:
+    if args.non_interactive or args.llm != 'none':
+        # Pipeline mode: use transform() directly
+        llm = make_llm(args.llm, model=args.model or None,
+                        base_url=getattr(args, 'llm_url', None))
         config = build_default_config(analysis, args)
+        result = transform(
+            quickstart_path=path,
+            output_dir=config['output_dir'],
+            pattern_name=config['pattern_name'],
+            llm=llm,
+            use_vault=config['use_vault'],
+            chart_strategy=config['chart_strategy'],
+        )
+        _print_transform_result(result)
+        sys.exit(0 if result.success else 1)
     else:
+        # Interactive mode
         config = interactive_config(analysis, args)
-
-    generator = PatternGenerator(analysis, config)
-    generator.generate()
-
-    print_results(config)
+        result = transform(
+            quickstart_path=path,
+            output_dir=config['output_dir'],
+            pattern_name=config['pattern_name'],
+            use_vault=config['use_vault'],
+            chart_strategy=config['chart_strategy'],
+        )
+        print_results(result.config or config)
 
 
 def print_analysis(analysis):
@@ -355,6 +403,51 @@ def print_results(config):
     print(f"  5. Edit ~/values-secret-{config['pattern_name']}.yaml with your secrets")
     print(f"  6. oc login <cluster>")
     print(f"  7. ./pattern.sh make install")
+
+
+def cmd_validate(args):
+    """Validate a generated pattern."""
+    llm = make_llm(args.llm, model=args.model or None,
+                    base_url=getattr(args, 'llm_url', None))
+    if args.fix:
+        result = validate_and_fix(
+            args.path, llm=llm, max_iterations=args.max_iterations,
+        )
+    else:
+        result = validate(args.path, llm=llm)
+
+    status = "VALID" if result.valid else "INVALID"
+    print(f"Validation: {status}")
+    for issue in result.issues:
+        fixed = " [FIXED]" if issue.fix_applied else ""
+        print(f"  [{issue.severity}] {issue.file}: {issue.message}{fixed}")
+    if result.fixes_applied:
+        print(f"\nAuto-fixes applied: {result.fixes_applied}")
+        print(f"Iterations: {result.iterations}")
+    sys.exit(0 if result.valid else 1)
+
+
+def _print_transform_result(result: TransformResult):
+    if result.success:
+        print(f"\nPattern generated: {result.pattern_dir}/")
+        print(f"Files: {len(result.files_created)}")
+        for f in result.files_created:
+            print(f"  {f}")
+        if result.llm_decisions:
+            print("\nLLM decisions:")
+            for d in result.llm_decisions:
+                print(f"  {d}")
+        if result.validation and result.validation.fixes_applied:
+            print(f"\nAuto-fixes applied: {result.validation.fixes_applied}")
+            print(f"Validation iterations: {result.validation.iterations}")
+        if result.warnings:
+            print("\nWarnings:")
+            for w in result.warnings:
+                print(f"  {w}")
+    else:
+        print("Transform failed:")
+        for w in result.warnings:
+            print(f"  {w}")
 
 
 def ask(prompt, default=None):

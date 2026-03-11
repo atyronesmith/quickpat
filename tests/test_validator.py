@@ -1,16 +1,9 @@
-"""Tests for skills.skill_validate."""
-
-import sys
-from pathlib import Path
+"""Tests for quickpat.validator."""
 
 import yaml
 import pytest
 
-# skill_validate imports from quickpat, so make sure both are on path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "skills"))
-
-from skill_validate import validate, validate_and_fix
+from quickpat.validator import validate, validate_and_fix
 
 
 def _make_valid_pattern(path):
