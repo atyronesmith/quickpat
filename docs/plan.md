@@ -32,7 +32,7 @@ All quickstarts pull from a single shared Helm repo (`ai-architecture-charts`) w
 
 10. ~~**Detect local forks of shared charts**~~ — DONE. Flags local charts whose name matches a shared chart in `ai-architecture-charts` and that don't pull it as a dependency. Detected: product-rec (2x minio), lls-obs (llama-stack).
 
-11. **External chart strategy for shared deps** — When generating a pattern with `--chart-strategy external`, reference shared charts from `ai-architecture-charts` by URL instead of copying locally. Only copy truly local/custom charts.
+11. ~~**External chart strategy for shared deps**~~ — DONE. Per-chart `strategy` and `repo_url` fields on `ChartInfo`. Generator checks per-chart strategy first, falls back to global `chart_strategy`. Only copies charts with local strategy.
 
 ## Priority 5 — Registry Integration
 
@@ -42,3 +42,9 @@ See [pub-integration-plan.md](pub-integration-plan.md) for details.
 - ~~**`quickpat create <name>`**~~ — DONE.
 - 12. **`quickpat batch`** — Transform all registered quickstarts. Useful for CI/testing.
 - 13. **Publication readiness check** — Programmatic subset of the pub checklist.
+
+## Priority 6 — Enhanced Questionnaire & Spec-Driven Creation
+
+14. ~~**Enhanced guided questionnaire**~~ — DONE. Interactive mode now includes: pattern tier (sandbox/tested/maintained), add operators not detected, namespace override table (multi-chart), secret classification (prompt/generate/skip), global options (syncPolicy, installPlanApproval). Generator accepts new config keys: `tier`, `secret_config`, `namespace_overrides`, `global_options`. All backward-compatible with defaults.
+
+15. ~~**`quickpat new` from spec YAML**~~ — DONE. `quickpat new <spec.yaml> [-o DIR] [--name NAME]` creates a complete pattern from a declarative spec file — no quickstart source needed. Spec defines charts (local path or external repo), operators, secrets, vault, tier, and global options. Builds `QuickstartAnalysis` from spec and feeds it to the existing generator. See `examples/sample-spec.yaml`.
