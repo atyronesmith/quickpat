@@ -12,6 +12,7 @@ from .analyzer import QuickstartAnalyzer, QuickstartAnalysis
 from .config import get as cfg
 from .generator import PatternGenerator
 from .operators import OPERATORS
+from .spec import load_spec, build_from_spec, SpecError
 from .validator import validate_and_fix, validate, ValidationResult
 
 LLMCallable = Callable
@@ -117,6 +118,7 @@ def transform(
     chart_strategy: str = "local",
     auto_fix: bool = True,
     max_fix_iterations: int = 3,
+    extra_config: dict = None,
 ) -> TransformResult:
     """Full pipeline: analyze -> detect -> generate -> validate/fix."""
     result = TransformResult(success=False)
@@ -159,6 +161,8 @@ def transform(
         "output_dir": output_dir,
         "clustergroup_version": cfg("pattern.clustergroup_version", "0.9.*"),
     }
+    if extra_config:
+        config.update(extra_config)
     result.config = config
 
     # 5. Generate
@@ -176,6 +180,59 @@ def transform(
     result.success = True
 
     # Collect warnings from validation
+    for issue in val_result.issues:
+        if not issue.fix_applied:
+            result.warnings.append(f"[{issue.severity}] {issue.file}: {issue.message}")
+
+    result.files_created = _list_created_files(output_dir, config)
+
+    return result
+
+
+# ── Create from Spec ─────────────────────────────────────────────────
+
+
+def create_from_spec(
+    spec_path: str,
+    output_dir: str = None,
+    pattern_name: str = None,
+    auto_fix: bool = True,
+    max_fix_iterations: int = 3,
+) -> TransformResult:
+    """Create a pattern from a spec YAML file (no quickstart source needed)."""
+    result = TransformResult(success=False)
+
+    try:
+        spec = load_spec(spec_path)
+        analysis, config = build_from_spec(spec, spec_path)
+    except SpecError as e:
+        result.warnings.append(str(e))
+        return result
+
+    if pattern_name:
+        config['pattern_name'] = pattern_name
+    if not output_dir:
+        base = Path(cfg("pattern.output_dir", "~/patterns")).expanduser()
+        output_dir = str(base / config['pattern_name'])
+    config['output_dir'] = output_dir
+    result.pattern_dir = output_dir
+    result.analysis = analysis
+
+    # Generate
+    skill_generate(analysis, config)
+
+    # Validate
+    if auto_fix:
+        val_result = validate_and_fix(
+            output_dir, config, max_iterations=max_fix_iterations,
+        )
+    else:
+        val_result = validate(output_dir, config)
+
+    result.validation = val_result
+    result.config = config
+    result.success = True
+
     for issue in val_result.issues:
         if not issue.fix_applied:
             result.warnings.append(f"[{issue.severity}] {issue.file}: {issue.message}")

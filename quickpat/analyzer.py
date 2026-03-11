@@ -67,6 +67,8 @@ class ChartInfo:
     dependencies: list = field(default_factory=list)
     values: dict = field(default_factory=dict)
     needs_oai_labels: bool = False
+    strategy: str = ""  # 'local' or 'external'; empty = use config default
+    repo_url: str = ""  # Helm repo URL for external charts
 
 
 @dataclass

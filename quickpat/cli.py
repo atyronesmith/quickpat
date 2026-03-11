@@ -12,7 +12,7 @@ from .config import get as cfg
 from .generator import build_report
 from .llm import make_llm
 from .operators import OPERATORS
-from .pipeline import transform, skill_analyze, TransformResult
+from .pipeline import transform, skill_analyze, create_from_spec, TransformResult
 from .registry import (
     fetch_registry, resolve_name, check_dependency_freshness,
     detect_local_forks, fetch_chart_index,
@@ -66,6 +66,18 @@ def main():
     )
     _add_llm_args(create_p)
 
+    # new subcommand
+    new_p = subparsers.add_parser(
+        'new', help='Create a Validated Pattern from a spec YAML file'
+    )
+    new_p.add_argument('spec', help='Path to spec YAML file')
+    new_p.add_argument('--output', '-o', help='Output directory')
+    new_p.add_argument('--name', help='Pattern name override')
+    new_p.add_argument(
+        '--non-interactive', action='store_true',
+        help='Use defaults, skip interactive prompts',
+    )
+
     # validate subcommand
     validate_p = subparsers.add_parser(
         'validate', help='Validate a generated pattern'
@@ -88,6 +100,8 @@ def main():
         cmd_analyze(args)
     elif args.command == 'create':
         cmd_create(args)
+    elif args.command == 'new':
+        cmd_new(args)
     elif args.command == 'validate':
         cmd_validate(args)
 
@@ -197,20 +211,47 @@ def cmd_create(args):
             llm=llm,
             use_vault=config['use_vault'],
             chart_strategy=config['chart_strategy'],
+            extra_config={k: v for k, v in config.items()
+                          if k in ('tier',)},
         )
         _print_transform_result(result)
         sys.exit(0 if result.success else 1)
     else:
         # Interactive mode
         config = interactive_config(analysis, args)
+        extra_keys = ('tier', 'secret_config', 'namespace_overrides', 'global_options')
+        extra = {k: config[k] for k in extra_keys if k in config}
         result = transform(
             quickstart_path=path,
             output_dir=config['output_dir'],
             pattern_name=config['pattern_name'],
             use_vault=config['use_vault'],
             chart_strategy=config['chart_strategy'],
+            extra_config=extra or None,
         )
         print_results(result.config or config)
+
+
+def cmd_new(args):
+    """Create a Validated Pattern from a spec YAML file."""
+    print("=== QuickPat: Create Pattern from Spec ===\n")
+
+    output_dir = args.output or str(
+        Path(args.patterns_dir) / (args.name or 'new-pattern')
+    )
+
+    result = create_from_spec(
+        spec_path=args.spec,
+        output_dir=output_dir,
+        pattern_name=args.name,
+    )
+
+    if result.success:
+        _print_transform_result(result)
+    else:
+        for w in result.warnings:
+            print(f"Error: {w}", file=sys.stderr)
+        sys.exit(1)
 
 
 def print_analysis(analysis):
@@ -296,6 +337,13 @@ def interactive_config(analysis, args):
     config['app_name'] = ask("Application name", analysis.name)
     config['app_namespace'] = ask("Target namespace", analysis.name)
 
+    # Pattern tier
+    config['tier'] = ask_choice(
+        "Pattern tier",
+        ['sandbox', 'tested', 'maintained'],
+        default='sandbox',
+    )
+
     # Operator selection
     if analysis.detected_operators:
         print("\nOperators to install:")
@@ -321,8 +369,59 @@ def interactive_config(analysis, args):
             config['operators'] = [
                 o for i, o in enumerate(all_ops) if i not in remove_indices
             ]
+
+        # Offer to add undetected operators
+        available = [k for k in OPERATORS if k not in config['operators']]
+        if available:
+            add_more = ask_yes_no("Add additional operators?", False)
+            if add_more:
+                print("  Available operators:")
+                for i, op_key in enumerate(available, 1):
+                    print(f"    {i}. {OPERATORS[op_key]['display_name']} ({op_key})")
+                answer = ask("Enter numbers to add (comma-separated)", "")
+                if answer:
+                    for part in answer.split(','):
+                        try:
+                            idx = int(part.strip()) - 1
+                            if 0 <= idx < len(available):
+                                config['operators'].append(available[idx])
+                        except ValueError:
+                            pass
     else:
         config['operators'] = []
+
+    # Namespace overrides (multi-chart only)
+    if len(analysis.charts) > 1:
+        print("\nNamespace assignments:")
+        print(f"  {'Chart':<20} {'Namespace':<20} {'OAI Labels'}")
+        print(f"  {'─'*20} {'─'*20} {'─'*10}")
+        for ci in analysis.charts:
+            ns = ci.group or ci.name
+            labels = "yes" if ci.needs_oai_labels else "no"
+            print(f"  {ci.name:<20} {ns:<20} {labels}")
+        if ask_yes_no("\nOverride namespace assignments?", False):
+            config['namespace_overrides'] = {}
+            for ci in analysis.charts:
+                default_ns = ci.group or ci.name
+                ns = ask(f"  Namespace for {ci.name}", default_ns)
+                if ns != default_ns:
+                    config['namespace_overrides'][ci.name] = ns
+
+    # Secret classification
+    if analysis.detected_secrets:
+        print("\nSecrets detected:")
+        for i, s in enumerate(analysis.detected_secrets, 1):
+            print(f"  {i}. {s.name} (at {s.path})")
+        if ask_yes_no("Classify secrets? (prompt/generate/skip)", False):
+            config['secret_config'] = {}
+            for s in analysis.detected_secrets:
+                action = ask_choice(
+                    f"  {s.name}",
+                    ['prompt', 'generate', 'skip'],
+                    default='prompt',
+                )
+                if action != 'prompt':
+                    config['secret_config'][s.name] = action
 
     # Chart strategy
     print("\nChart inclusion strategy:")
@@ -344,6 +443,16 @@ def interactive_config(analysis, args):
     config['use_vault'] = ask_yes_no(
         "Enable HashiCorp Vault for secrets?", True
     )
+
+    # Global options
+    if ask_yes_no("Customize global options?", False):
+        config['global_options'] = {}
+        config['global_options']['syncPolicy'] = ask_choice(
+            "Sync policy", ['Automatic', 'Manual'], default='Automatic',
+        )
+        config['global_options']['installPlanApproval'] = ask_choice(
+            "Install plan approval", ['Automatic', 'Manual'], default='Automatic',
+        )
 
     # Output directory
     default_output = args.output or str(
@@ -367,6 +476,7 @@ def build_default_config(analysis, args):
         'use_vault': bool(analysis.detected_secrets),
         'output_dir': args.output or str(Path(args.patterns_dir) / name),
         'clustergroup_version': '0.9.*',
+        'tier': 'sandbox',
     }
 
 
@@ -463,3 +573,17 @@ def ask_yes_no(prompt, default=True):
     if not answer:
         return default
     return answer in ('y', 'yes')
+
+
+def ask_choice(prompt, choices, default=None):
+    """Ask user to pick from a list of choices."""
+    labels = '/'.join(
+        c.upper() if c == default else c for c in choices
+    )
+    answer = input(f"{prompt} ({labels}): ").strip().lower()
+    if not answer:
+        return default
+    for c in choices:
+        if c.lower() == answer:
+            return c
+    return default

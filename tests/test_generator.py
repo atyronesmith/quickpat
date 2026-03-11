@@ -190,6 +190,106 @@ class TestSecretDedup:
         assert data["version"] == "2.0"
 
 
+class TestNewConfigKeys:
+    def test_tier_in_metadata(self, single_chart_quickstart, tmp_path):
+        out, _, _ = _generate(single_chart_quickstart, tmp_path, tier="tested")
+        from pathlib import Path
+        with open(Path(out) / "pattern-metadata.yaml") as f:
+            data = yaml.safe_load(f)
+        assert data["tier"] == "tested"
+
+    def test_tier_defaults_to_sandbox(self, single_chart_quickstart, tmp_path):
+        out, _, _ = _generate(single_chart_quickstart, tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "pattern-metadata.yaml") as f:
+            data = yaml.safe_load(f)
+        assert data["tier"] == "sandbox"
+
+    def test_global_options_sync_policy(self, single_chart_quickstart, tmp_path):
+        out, _, _ = _generate(single_chart_quickstart, tmp_path,
+                              global_options={"syncPolicy": "Manual"})
+        from pathlib import Path
+        with open(Path(out) / "values-global.yaml") as f:
+            data = yaml.safe_load(f)
+        assert data["global"]["options"]["syncPolicy"] == "Manual"
+
+    def test_global_options_install_plan(self, single_chart_quickstart, tmp_path):
+        out, _, _ = _generate(single_chart_quickstart, tmp_path,
+                              global_options={"installPlanApproval": "Manual"})
+        from pathlib import Path
+        with open(Path(out) / "values-global.yaml") as f:
+            data = yaml.safe_load(f)
+        assert data["global"]["options"]["installPlanApproval"] == "Manual"
+
+    def test_global_options_default_automatic(self, single_chart_quickstart, tmp_path):
+        out, _, _ = _generate(single_chart_quickstart, tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "values-global.yaml") as f:
+            data = yaml.safe_load(f)
+        assert data["global"]["options"]["syncPolicy"] == "Automatic"
+        assert data["global"]["options"]["installPlanApproval"] == "Automatic"
+
+    def test_secret_config_skip(self, single_chart_quickstart, tmp_path):
+        out, _, _ = _generate(single_chart_quickstart, tmp_path,
+                              secret_config={"password": "skip"})
+        from pathlib import Path
+        with open(Path(out) / "values-secret.yaml.template") as f:
+            data = yaml.safe_load(f)
+        field_names = [f["name"] for f in data["secrets"][0]["fields"]]
+        assert "password" not in field_names
+
+    def test_secret_config_generate(self, single_chart_quickstart, tmp_path):
+        out, _, _ = _generate(single_chart_quickstart, tmp_path,
+                              secret_config={"password": "generate"})
+        from pathlib import Path
+        with open(Path(out) / "values-secret.yaml.template") as f:
+            data = yaml.safe_load(f)
+        fields = data["secrets"][0]["fields"]
+        pw = [f for f in fields if f["name"] == "password"][0]
+        assert pw["onMissingValue"] == "generate"
+        assert pw["vaultPolicy"] == "validatedPatternDefaultPolicy"
+
+    def test_namespace_overrides(self, multi_chart_quickstart, tmp_path):
+        out, _, _ = _generate(multi_chart_quickstart, tmp_path,
+                              namespace_overrides={"db": "data-tier"})
+        from pathlib import Path
+        with open(Path(out) / "values-hub.yaml") as f:
+            data = yaml.safe_load(f)
+        apps = data["clusterGroup"]["applications"]
+        assert apps["db"]["namespace"] == "data-tier"
+        assert apps["app"]["namespace"] == "app"  # unchanged
+
+    def test_per_chart_strategy(self, tmp_path):
+        from quickpat.analyzer import QuickstartAnalysis, ChartInfo
+        chart_src = tmp_path / "src" / "local-app"
+        chart_src.mkdir(parents=True)
+        (chart_src / "Chart.yaml").write_text("name: local-app\n")
+        analysis = QuickstartAnalysis(
+            name="mixed", version="1.0.0", description="test",
+            charts=[
+                ChartInfo(name="local-app", chart_path=str(chart_src), strategy="local"),
+                ChartInfo(name="ext-app", version="2.0.0", strategy="external",
+                          repo_url="https://charts.example.com"),
+            ],
+        )
+        out = str(tmp_path / "output")
+        config = {
+            "pattern_name": "test", "app_name": "mixed", "app_namespace": "mixed",
+            "operators": [], "chart_strategy": "external", "use_vault": False,
+            "output_dir": out, "clustergroup_version": "0.9.*",
+        }
+        from quickpat.generator import PatternGenerator
+        PatternGenerator(analysis, config).generate()
+        from pathlib import Path
+        with open(Path(out) / "values-hub.yaml") as f:
+            data = yaml.safe_load(f)
+        apps = data["clusterGroup"]["applications"]
+        assert apps["local-app"]["path"] == "charts/all/local-app"
+        assert "repoURL" not in apps["local-app"]
+        assert apps["ext-app"]["repoURL"] == "https://charts.example.com"
+        assert "path" not in apps["ext-app"]
+
+
 class TestVaultDisabled:
     def test_no_secrets_file_without_vault(self, tmp_path):
         qs = tmp_path / "qs"

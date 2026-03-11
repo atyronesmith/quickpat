@@ -35,20 +35,26 @@ class PatternGenerator:
         self._generate_overrides()
         self._generate_report()
 
-        if self.config.get('chart_strategy') == 'local':
+        # Copy charts with local strategy (per-chart or global default)
+        has_local = any(
+            (ci.strategy or self.config.get('chart_strategy', 'local')) == 'local'
+            for ci in self.analysis.charts
+        )
+        if has_local:
             self._copy_chart_locally()
 
     # ── values-global.yaml ──────────────────────────────────────────
 
     def _generate_values_global(self):
         # main: is a root-level key, NOT nested under global:
+        global_opts = self.config.get('global_options', {})
         data = {
             'global': {
                 'pattern': self.config['pattern_name'],
                 'options': {
                     'useCSV': False,
-                    'syncPolicy': 'Automatic',
-                    'installPlanApproval': 'Automatic',
+                    'syncPolicy': global_opts.get('syncPolicy', 'Automatic'),
+                    'installPlanApproval': global_opts.get('installPlanApproval', 'Automatic'),
                 },
             },
             'main': {
@@ -97,11 +103,16 @@ class PatternGenerator:
 
     def _get_app_charts(self):
         """Return list of (app_name, namespace, ChartInfo) for all charts."""
+        ns_overrides = self.config.get('namespace_overrides', {})
         if len(self.analysis.charts) > 1:
-            return [(ci.name, ci.group or ci.name, ci) for ci in self.analysis.charts]
+            result = []
+            for ci in self.analysis.charts:
+                ns = ns_overrides.get(ci.name, ci.group or ci.name)
+                result.append((ci.name, ns, ci))
+            return result
         ci = self.analysis.charts[0]
         app_name = self.config.get('app_name', self.analysis.name)
-        app_ns = self.config.get('app_namespace', self.analysis.name)
+        app_ns = ns_overrides.get(ci.name, self.config.get('app_namespace', self.analysis.name))
         return [(app_name, app_ns, ci)]
 
     def _build_namespaces(self, operators, app_namespace, use_vault):
@@ -192,8 +203,10 @@ class PatternGenerator:
             }
 
         # Application chart(s)
-        for name, ns, _ in self._get_app_charts():
-            if self.config.get('chart_strategy') == 'local':
+        default_strategy = self.config.get('chart_strategy', 'local')
+        for name, ns, ci in self._get_app_charts():
+            strategy = ci.strategy or default_strategy
+            if strategy == 'local':
                 applications[name] = {
                     'name': name,
                     'namespace': ns,
@@ -201,14 +214,15 @@ class PatternGenerator:
                     'path': f'charts/all/{name}',
                 }
             else:
+                repo_url = ci.repo_url or self.config.get('chart_repo_url', '')
                 applications[name] = {
                     'name': name,
                     'namespace': ns,
                     'project': 'hub',
-                    'repoURL': self.config.get('chart_repo_url', ''),
+                    'repoURL': repo_url,
                     'chart': name,
                     'targetRevision': self.config.get(
-                        'chart_version', self.analysis.version
+                        'chart_version', ci.version or self.analysis.version
                     ),
                 }
 
@@ -220,9 +234,15 @@ class PatternGenerator:
         if not self.config.get('use_vault'):
             return
 
+        secret_config = self.config.get('secret_config', {})
         fields = []
         seen_names = {}  # name -> count
         for secret in self.analysis.detected_secrets:
+            # Check if this secret should be skipped
+            action = secret_config.get(secret.name, 'prompt')
+            if action == 'skip':
+                continue
+
             name = secret.name
             if name in seen_names:
                 # Disambiguate using the path: rag.pgvector.secret.password -> pgvector_password
@@ -236,10 +256,11 @@ class PatternGenerator:
                     seen_names[name] += 1
                     name = f"{name}_{seen_names[name]}"
             seen_names[name] = 1
-            fields.append({
-                'name': name,
-                'onMissingValue': 'prompt',
-            })
+
+            field_entry = {'name': name, 'onMissingValue': action}
+            if action == 'generate':
+                field_entry['vaultPolicy'] = 'validatedPatternDefaultPolicy'
+            fields.append(field_entry)
 
         if not fields:
             # Generate a placeholder secret
@@ -463,7 +484,7 @@ podman run -it --rm --pull=newer \
             'name': pattern_name,
             'pattern_version': '1.0',
             'display_name': display_name,
-            'tier': 'sandbox',
+            'tier': self.config.get('tier', 'sandbox'),
         }
         self._write_yaml(self.output_dir / 'pattern-metadata.yaml', data)
 
@@ -525,7 +546,11 @@ podman run -it --rm --pull=newer \
     # ── charts ──────────────────────────────────────────────────────
 
     def _copy_chart_locally(self):
+        default_strategy = self.config.get('chart_strategy', 'local')
         for ci in self.analysis.charts:
+            strategy = ci.strategy or default_strategy
+            if strategy != 'local':
+                continue
             dest = self.output_dir / 'charts' / 'all' / ci.name
             src = Path(ci.chart_path)
 

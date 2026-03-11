@@ -1,0 +1,39 @@
+# Sample spec YAML for `quickpat new`
+#
+# Usage: quickpat new examples/sample-spec.yaml -o /tmp/test-new
+#
+# All fields except 'name' are optional.
+
+name: my-ai-app
+description: Custom AI application pattern
+tier: sandbox   # sandbox | tested | maintained
+
+charts:
+  - name: my-inference
+    path: ./charts/my-inference    # local chart (copied into pattern)
+    namespace: ai-inference
+    labels:
+      opendatahub.io/dashboard: "true"
+
+  - name: my-frontend
+    repo: https://charts.example.com  # external chart (referenced by URL)
+    version: "1.2.0"
+    namespace: frontend
+
+operators:
+  - openshift-ai
+  - nvidia-gpu
+
+secrets:
+  - name: hf_token
+    onMissingValue: prompt     # user provides at deploy time
+  - name: db_password
+    onMissingValue: generate   # auto-generate with vault policy
+
+vault:
+  enabled: true
+
+options:
+  syncPolicy: Automatic           # Automatic | Manual
+  installPlanApproval: Automatic   # Automatic | Manual
+  clustergroup_version: "0.9.*"
