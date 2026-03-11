@@ -22,7 +22,7 @@ Given an AI Quickstart (a portable Helm-based demo from the rh-ai-quickstart Git
 
 ## 1. Quickstart Analysis
 
-### Finding the Helm Chart
+### Finding Helm Charts
 
 AI Quickstarts store their charts in different locations. Search in this priority order:
 
@@ -34,7 +34,9 @@ AI Quickstarts store their charts in different locations. Search in this priorit
 | 4 | `chart/` | lemonade-stand-assistant |
 | 5 | Root (Chart.yaml at top) | Simple charts |
 
-Look for `Chart.yaml` — that's the anchor. If a directory contains subdirectories with their own `Chart.yaml`, use the subdirectory (e.g., `deploy/helm/rag/` not `deploy/helm/`).
+Look for `Chart.yaml` — that's the anchor. The search is **recursive** — all subdirectories under each search path are scanned for `Chart.yaml`. A quickstart may contain **multiple charts** (e.g., `deploy/helm/app/`, `deploy/helm/db/`, `deploy/helm/ui/`), each becoming a separate ArgoCD application in the pattern.
+
+**Multi-chart naming:** With a single chart, the pattern uses the chart name. With multiple charts, the top-level name is the repository directory name and each chart becomes its own application.
 
 ### Detecting Operators
 
@@ -60,10 +62,18 @@ Scan all YAML/template files for these keywords to determine which OpenShift ope
 
 ### Detecting Secrets
 
-Walk the `values.yaml` tree. Any key matching these patterns is a potential secret:
+Walk the `values.yaml` tree for each chart. Any key matching these patterns is a potential secret:
 `token`, `key`, `password`, `secret`, `credential`, `api_key`, `apikey`, `api-key`, `access_key`, `secret_key`
 
 Record the full dotted path (e.g., `llm-service.secret.hf_token`).
+
+**False positive filtering** — three layers prevent noise:
+
+1. **Known false positives** (exact match, always excluded): `secretkey`, `key`, `secrets`, `bearertokenauth`
+2. **Reference suffixes** — keys ending in these are references TO secrets, not values: `name`, `ref`, `path`, `namespace`, `mount`, `class`, `store`, `backend`, `provider`, `type`, `kind`, `version`. E.g., `secretName`, `tokenSecretName` are filtered out.
+3. **Config prefixes** — keys starting with these (followed by uppercase or `_`) are boolean/config flags: `use`, `enable`, `disable`, `is`, `has`, `no`. E.g., `useToken`, `enableSecret` are filtered out.
+
+Duplicate secret names across charts are disambiguated using the values path (e.g., two `password` keys become `pgvector_password` and `redis_password`).
 
 ### Detecting Features
 
@@ -74,6 +84,18 @@ Record the full dotted path (e.g., `llm-service.secret.hf_token`).
 | Object Storage | Dependencies named: minio, s3, object-storage; or "minio" in templates |
 | Data Pipeline | Dependencies named: ingestion-pipeline, pipeline, data-pipeline |
 | GPU Required | NVIDIA GPU operator detected; or "gpu" in templates |
+
+### Namespace Grouping (Multi-Chart)
+
+When a quickstart has multiple charts, namespaces are assigned by subdirectory structure:
+
+- Charts sharing a parent directory (e.g., `observability/collector` and `observability/tempo`) are grouped into a **shared namespace** (`observability`).
+- Charts with no subdirectory grouping get their own namespace (chart name).
+- **Numbered prefixes are stripped**: `01-operators/` → group `operators`, `02-services/` → group `services`.
+
+**OAI label propagation:** If ANY chart in a namespace group needs OpenShift AI labels, the entire shared namespace gets `opendatahub.io/dashboard: "true"` and `modelmesh-enabled: "false"`.
+
+**Inference detection per chart:** A chart needs OAI labels if it contains `inferenceservice`, `servingruntime`, or `datasciencecluster` in its templates, OR has dependencies named `llm-service`, `vllm`, `llama-stack`, `model-service`, or `tgi`.
 
 ---
 
@@ -99,7 +121,8 @@ A valid pattern produces exactly these files:
     values-GCP.yaml
     values-IBMCloud.yaml
     values-None.yaml
-  charts/all/<app-name>/      # The quickstart Helm chart (local strategy)
+  charts/all/<app-name>/      # Quickstart Helm chart(s) (local strategy)
+  charts/all/<app-name-2>/    # Additional charts for multi-chart quickstarts
   docs/
     quickstart-analysis.md    # Generated analysis report
 ```
@@ -146,14 +169,17 @@ clusterGroup:
     - openshift-serverless:
         operatorGroup: true
         targetNamespaces: []
-    # Application namespace
+    # Application namespace(s)
+    # Single chart: one namespace matching the app name
+    # Multi-chart: one namespace per group (or per chart if ungrouped)
     - <app-namespace>:
-        operatorGroup: true          # Only if OpenShift AI detected
+        operatorGroup: true          # Only if any chart in this namespace needs OAI
         targetNamespaces:
           - <app-namespace>
         labels:
-          opendatahub.io/dashboard: "true"
+          opendatahub.io/dashboard: "true"    # Only if OAI inference detected
           modelmesh-enabled: "false"
+    - <other-namespace>             # Plain string if no OAI labels needed
 
   subscriptions:
     <operator-key>:
@@ -182,12 +208,18 @@ clusterGroup:
       project: hub
       chart: golang-external-secrets
       chartVersion: "0.2.*"
-    # The quickstart app (local chart strategy)
+    # Application chart(s) — one per chart (local strategy)
     <app-name>:
       name: <app-name>
-      namespace: <app-namespace>
+      namespace: <app-namespace>      # Group namespace if multi-chart grouped
       project: hub
       path: charts/all/<app-name>
+    # Multi-chart: additional applications
+    <app-name-2>:
+      name: <app-name-2>
+      namespace: <app-namespace-2>
+      project: hub
+      path: charts/all/<app-name-2>
 ```
 
 **For external chart strategy** (instead of `path:`):
@@ -263,27 +295,51 @@ $(ANSIBLE_RUN) rhvp.cluster_utils.validate_prereq
 
 ---
 
-## 5. Validation Checklist
+## 5. Validation & Auto-Fix
 
-After generating a pattern, verify:
+After generating a pattern, the validator runs deterministic structural checks and optionally an LLM semantic review. When auto-fix is enabled (default), a self-correcting loop applies fixes and re-validates up to 3 iterations.
+
+### Checklist
 
 - [ ] `values-global.yaml`: `main:` is at root level (sibling of `global:`, not nested)
 - [ ] `values-global.yaml`: `multiSourceConfig.enabled: true`
+- [ ] `values-global.yaml`: `clusterGroupChartVersion` present in multiSourceConfig
 - [ ] `values-hub.yaml`: vault + golang-external-secrets apps present (if vault enabled)
 - [ ] `values-hub.yaml`: Infrastructure apps use `chart:` + `chartVersion:` (not `path:`)
-- [ ] `values-hub.yaml`: Application app uses `path: charts/all/<name>` (local) or `repoURL:` (external)
+- [ ] `values-hub.yaml`: Application apps use `path: charts/all/<name>` (local) or `repoURL:` (external)
 - [ ] `values-hub.yaml`: `sharedValueFiles` references overrides template
 - [ ] `values-hub.yaml`: Operators with dedicated namespaces have `operatorGroup: true` where needed
 - [ ] `values-hub.yaml`: `projects: [hub]` (list format)
+- [ ] `values-hub.yaml`: `subscriptions:` is a dict (not a list)
 - [ ] `values-secret.yaml.template`: Has `version: "2.0"`
-- [ ] `values-secret.yaml.template`: Uses `vaultPrefixes:` (plural, list)
+- [ ] `values-secret.yaml.template`: Uses `vaultPrefixes:` (plural, list) — NOT `vaultPrefixOverride`
 - [ ] `Makefile`: Contains only `include Makefile-common`
 - [ ] `Makefile-common`: Uses `$(ANSIBLE_RUN) rhvp.cluster_utils.*` targets
 - [ ] `pattern.sh`: Present, executable, uses utility container
-- [ ] `charts/all/<name>/`: Chart copied (local strategy) with Chart.yaml
+- [ ] `charts/all/<name>/`: Chart(s) copied (local strategy) with Chart.yaml
 - [ ] `overrides/`: Platform files exist (AWS, Azure, GCP, IBMCloud, None)
 - [ ] No `common/` directory (not needed with multisource)
 - [ ] No `setup-common.sh` (obsolete)
+- [ ] No `charts/hub/` paths (must be `charts/all/`)
+
+### Auto-Fixable Issues
+
+The validator can automatically fix these common issues:
+
+| Issue | Fix Applied |
+|-------|-------------|
+| `main:` nested under `global:` | Moved to root level |
+| `multiSourceConfig.enabled` not true | Set to `true` |
+| Missing `clusterGroupChartVersion` | Added from config default |
+| Secret `version` missing or wrong | Set to `"2.0"` |
+| `vaultPrefixOverride` used | Converted to `vaultPrefixes: [value]` |
+| `vaultPrefixes` not a list | Wrapped in list |
+| `include common/Makefile` | Changed to `include Makefile-common` |
+| `pattern.sh` not executable | `chmod 755` |
+| Chart path `charts/hub/` | Changed to `charts/all/` |
+| Missing `sharedValueFiles` | Added with platform override template |
+| Infra app uses `path:` | Changed to `chart:` + `chartVersion:` |
+| Missing `overrides/` directory or files | Created with platform placeholders |
 
 ---
 
@@ -324,14 +380,16 @@ cp values-secret.yaml.template ~/values-secret-<pattern-name>.yaml
 
 When asked to transform a quickstart:
 
-1. **Locate** the Helm chart (search priority order above)
-2. **Parse** Chart.yaml for name, version, dependencies
-3. **Parse** values.yaml for configuration and secrets
-4. **Detect** required operators by scanning all YAML/template files
-5. **Resolve** co-dependencies (OpenShift AI -> Service Mesh + Serverless, GPU -> NFD)
-6. **Generate** all pattern files following exact schemas above
-7. **Validate** against the checklist
-8. **Report** what was generated and any edge cases that need manual review
+1. **Locate** all Helm charts (recursive search in priority order above)
+2. **Parse** each Chart.yaml for name, version, dependencies
+3. **Compute** namespace grouping from subdirectory structure (strip numeric prefixes)
+4. **Parse** each values.yaml for configuration and secrets (with false-positive filtering)
+5. **Detect** required operators by scanning all YAML/template files across all charts
+6. **Detect** inference indicators per chart for OAI namespace labeling
+7. **Resolve** co-dependencies (OpenShift AI -> Service Mesh + Serverless, GPU -> NFD)
+8. **Generate** all pattern files following exact schemas above (one application per chart)
+9. **Validate** against the checklist, auto-fix issues, and re-validate
+10. **Report** what was generated and any edge cases that need manual review
 
 ## Output Format
 
