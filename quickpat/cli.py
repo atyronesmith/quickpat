@@ -78,6 +78,20 @@ def main():
         help='Use defaults, skip interactive prompts',
     )
 
+    # batch subcommand
+    batch_p = subparsers.add_parser(
+        'batch', help='Transform all registered quickstarts'
+    )
+    batch_p.add_argument('--output', '-o', help='Root output directory')
+    batch_p.add_argument(
+        '--filter', help='Only process quickstarts matching this substring'
+    )
+    batch_p.add_argument(
+        '--keep-going', action='store_true',
+        help='Continue on failure instead of stopping',
+    )
+    _add_llm_args(batch_p)
+
     # validate subcommand
     validate_p = subparsers.add_parser(
         'validate', help='Validate a generated pattern'
@@ -102,6 +116,8 @@ def main():
         cmd_create(args)
     elif args.command == 'new':
         cmd_new(args)
+    elif args.command == 'batch':
+        cmd_batch(args)
     elif args.command == 'validate':
         cmd_validate(args)
 
@@ -252,6 +268,87 @@ def cmd_new(args):
         for w in result.warnings:
             print(f"Error: {w}", file=sys.stderr)
         sys.exit(1)
+
+
+def cmd_batch(args):
+    """Transform all registered quickstarts."""
+    print("=== QuickPat Batch: Transform All Quickstarts ===\n")
+
+    try:
+        registry = fetch_registry()
+    except RuntimeError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if args.filter:
+        filt = args.filter.lower()
+        registry = [e for e in registry if filt in e['name'].lower()]
+
+    if not registry:
+        print("No matching quickstarts found.")
+        sys.exit(0)
+
+    llm = make_llm(args.llm, model=args.model or None,
+                    base_url=getattr(args, 'llm_url', None))
+
+    output_root = Path(args.output or args.patterns_dir)
+    results = []
+
+    for i, entry in enumerate(registry, 1):
+        name = entry['name']
+        url = entry.get('url')
+        if not url:
+            results.append((name, 'SKIP', 'no URL'))
+            continue
+
+        print(f"[{i}/{len(registry)}] {name}...")
+
+        try:
+            tmpdir = _clone(url)
+        except subprocess.CalledProcessError:
+            print(f"  clone failed")
+            results.append((name, 'FAIL', 'clone failed'))
+            if not args.keep_going:
+                break
+            continue
+
+        pattern_name = f"{name}-pattern"
+        output_dir = str(output_root / pattern_name)
+
+        try:
+            result = transform(
+                quickstart_path=tmpdir,
+                output_dir=output_dir,
+                pattern_name=pattern_name,
+                llm=llm,
+            )
+            if result.success and result.validation and result.validation.valid:
+                print(f"  OK -> {output_dir}/")
+                results.append((name, 'OK', ''))
+            else:
+                issues = len(result.warnings)
+                print(f"  WARN ({issues} issues)")
+                results.append((name, 'WARN', f'{issues} issues'))
+        except Exception as e:
+            print(f"  FAIL: {e}")
+            results.append((name, 'FAIL', str(e)))
+            if not args.keep_going:
+                break
+
+    # Summary
+    ok = sum(1 for _, s, _ in results if s == 'OK')
+    warn = sum(1 for _, s, _ in results if s == 'WARN')
+    fail = sum(1 for _, s, _ in results if s == 'FAIL')
+    skip = sum(1 for _, s, _ in results if s == 'SKIP')
+
+    print(f"\n--- Batch Summary ---\n")
+    print(f"  {'Quickstart':<40} {'Status':<6} {'Detail'}")
+    print(f"  {'─'*40} {'─'*6} {'─'*30}")
+    for name, status, detail in results:
+        print(f"  {name:<40} {status:<6} {detail}")
+    print(f"\n  OK: {ok}  WARN: {warn}  FAIL: {fail}  SKIP: {skip}  Total: {len(results)}")
+
+    sys.exit(1 if fail > 0 else 0)
 
 
 def print_analysis(analysis):

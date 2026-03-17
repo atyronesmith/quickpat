@@ -40,7 +40,7 @@ See [pub-integration-plan.md](pub-integration-plan.md) for details.
 
 - ~~**`quickpat list`**~~ — DONE.
 - ~~**`quickpat create <name>`**~~ — DONE.
-- 12. **`quickpat batch`** — Transform all registered quickstarts. Useful for CI/testing.
+- ~~12. **`quickpat batch`**~~ — DONE. `quickpat batch [--filter NAME] [--keep-going] [-o DIR] [--llm PROVIDER]`. Transforms all registered quickstarts with summary table. Supports `--filter` for substring match and `--keep-going` to continue on failure. All 11 quickstarts pass.
 - 13. **Publication readiness check** — Programmatic subset of the pub checklist.
 
 ## Priority 6 — Enhanced Questionnaire & Spec-Driven Creation
