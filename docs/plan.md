@@ -41,7 +41,7 @@ See [pub-integration-plan.md](pub-integration-plan.md) for details.
 - ~~**`quickpat list`**~~ — DONE.
 - ~~**`quickpat create <name>`**~~ — DONE.
 - ~~12. **`quickpat batch`**~~ — DONE. `quickpat batch [--filter NAME] [--keep-going] [-o DIR] [--llm PROVIDER]`. Transforms all registered quickstarts with summary table. Supports `--filter` for substring match and `--keep-going` to continue on failure. All 11 quickstarts pass.
-- 13. **Publication readiness check** — Programmatic subset of the pub checklist.
+- ~~13. **Publication readiness check**~~ — DONE. `quickpat check-ready <path|URL|name>`. Checks: README, LICENSE, Chart.yaml fields, values.yaml, templates/, hardcoded image tags, stale deps, local forks, .gitignore, sensitive files. Errors block readiness; warnings are advisory.
 
 ## Priority 6 — Enhanced Questionnaire & Spec-Driven Creation
 

@@ -38,5 +38,5 @@ The pub repo has a readiness checklist. QuickPat could add a `quickpat check-rea
 
 - **1. `quickpat list`** — DONE. Fetches `.gitmodules` from GitHub, parses entries, displays names + URLs.
 - **2. `quickpat create <name>`** — DONE. Resolves name via registry (exact, case-insensitive, substring), clones, transforms. Error on ambiguous/unknown names.
-- **3. `quickpat batch`** — TODO.
-- **4. Publication readiness check** — TODO.
+- **3. `quickpat batch`** — DONE. Transforms all registered quickstarts with summary table.
+- **4. Publication readiness check** — DONE. `quickpat check-ready` validates quickstart repos against pub criteria.

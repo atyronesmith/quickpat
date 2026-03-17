@@ -13,6 +13,7 @@ from .generator import build_report
 from .llm import make_llm
 from .operators import OPERATORS
 from .pipeline import transform, skill_analyze, create_from_spec, TransformResult
+from .readiness import check_readiness
 from .registry import (
     fetch_registry, resolve_name, check_dependency_freshness,
     detect_local_forks, fetch_chart_index,
@@ -92,6 +93,14 @@ def main():
     )
     _add_llm_args(batch_p)
 
+    # check-ready subcommand
+    ready_p = subparsers.add_parser(
+        'check-ready', help='Check if a quickstart is publication-ready'
+    )
+    ready_p.add_argument(
+        'path', help='Path, GitHub URL, or registry name (e.g. RAG)'
+    )
+
     # validate subcommand
     validate_p = subparsers.add_parser(
         'validate', help='Validate a generated pattern'
@@ -118,6 +127,8 @@ def main():
         cmd_new(args)
     elif args.command == 'batch':
         cmd_batch(args)
+    elif args.command == 'check-ready':
+        cmd_check_ready(args)
     elif args.command == 'validate':
         cmd_validate(args)
 
@@ -349,6 +360,37 @@ def cmd_batch(args):
     print(f"\n  OK: {ok}  WARN: {warn}  FAIL: {fail}  SKIP: {skip}  Total: {len(results)}")
 
     sys.exit(1 if fail > 0 else 0)
+
+
+def cmd_check_ready(args):
+    """Check if a quickstart is publication-ready."""
+    path = resolve_path(args.path)
+    result = check_readiness(path)
+
+    status = "READY" if result.ready else "NOT READY"
+    print(f"Quickstart: {result.name}")
+    print(f"Charts found: {result.charts_found}")
+    print(f"Status: {status}\n")
+
+    if result.issues:
+        errors = [i for i in result.issues if i.severity == "error"]
+        warnings = [i for i in result.issues if i.severity == "warning"]
+
+        if errors:
+            print("Errors:")
+            for i in errors:
+                print(f"  [{i.category}] {i.message}")
+
+        if warnings:
+            print("Warnings:")
+            for i in warnings:
+                print(f"  [{i.category}] {i.message}")
+
+        print(f"\n  Errors: {len(errors)}  Warnings: {len(warnings)}")
+    else:
+        print("No issues found.")
+
+    sys.exit(0 if result.ready else 1)
 
 
 def print_analysis(analysis):
