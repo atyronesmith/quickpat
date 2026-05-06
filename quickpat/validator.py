@@ -11,13 +11,12 @@ Usage:
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 import yaml
 
 from .config import get as cfg
-
-LLMCallable = Callable
+from .providers.base import Provider
 
 
 @dataclass
@@ -42,7 +41,7 @@ class ValidationResult:
 # ── Public API ───────────────────────────────────────────────────────
 
 
-def validate(pattern_dir: str, config: dict = None, llm: LLMCallable = None) -> ValidationResult:
+def validate(pattern_dir: str, config: dict = None, llm: Provider = None) -> ValidationResult:
     """Validate a pattern directory. Returns issues found."""
     out = Path(pattern_dir)
     if not out.is_dir():
@@ -73,7 +72,7 @@ def validate(pattern_dir: str, config: dict = None, llm: LLMCallable = None) -> 
 def validate_and_fix(
     pattern_dir: str,
     config: dict = None,
-    llm: LLMCallable = None,
+    llm: Provider = None,
     max_iterations: int = 3,
 ) -> ValidationResult:
     """Validate, auto-fix issues, and re-validate in a loop."""
@@ -210,6 +209,7 @@ def _check_values_hub(out: Path, config: dict = None) -> list:
                     auto_fixable=True,
                 ))
 
+    valid_path_prefixes = ('charts/all/', 'charts/pattern-secrets')
     for app_name, app in apps.items():
         if app_name in ("vault", "golang-external-secrets"):
             continue
@@ -220,12 +220,16 @@ def _check_values_hub(out: Path, config: dict = None) -> list:
                 "values-hub.yaml", "warning",
                 f"App '{app_name}' has neither path: nor repoURL:/chart:",
             ))
-        if has_path and not app["path"].startswith("charts/all/"):
+        # Only check local path prefix for apps without repoURL (local charts)
+        if has_path and "repoURL" not in app and not any(app["path"].startswith(p) for p in valid_path_prefixes):
             issues.append(Issue(
                 "values-hub.yaml", "error",
-                f"App '{app_name}' path should start with charts/all/, got: {app['path']}",
+                f"App '{app_name}' path should start with charts/all/ or charts/pattern-secrets, got: {app['path']}",
                 auto_fixable=True,
             ))
+
+    # Remote strategy checks
+    issues.extend(_check_remote_strategy(out, apps))
 
     return issues
 
@@ -369,6 +373,64 @@ def _check_no_legacy(out: Path) -> list:
     return issues
 
 
+def _check_remote_strategy(out: Path, apps: dict) -> list:
+    """Validate remote-strategy specific requirements."""
+    issues = []
+
+    # Detect remote apps (have repoURL + path, no chart key)
+    remote_apps = {
+        name: app for name, app in apps.items()
+        if "repoURL" in app and "path" in app and "chart" not in app
+        and name not in ("vault", "golang-external-secrets")
+    }
+    if not remote_apps:
+        return issues
+
+    # pattern-secrets chart must exist if declared
+    if "pattern-secrets" in apps:
+        ps_dir = out / "charts" / "pattern-secrets"
+        if not ps_dir.is_dir():
+            issues.append(Issue(
+                "charts/pattern-secrets/", "error",
+                "pattern-secrets app declared but charts/pattern-secrets/ directory missing",
+            ))
+        elif not (ps_dir / "Chart.yaml").exists():
+            issues.append(Issue(
+                "charts/pattern-secrets/Chart.yaml", "error",
+                "charts/pattern-secrets/ missing Chart.yaml",
+            ))
+        else:
+            # Check ExternalSecret templates use v1
+            tmpl_dir = ps_dir / "templates"
+            if tmpl_dir.is_dir():
+                for tmpl in tmpl_dir.glob("*.yaml"):
+                    data = _load_yaml(tmpl)
+                    if not data:
+                        continue
+                    api_ver = data.get("apiVersion", "")
+                    if "external-secrets.io" in api_ver and api_ver != "external-secrets.io/v1":
+                        issues.append(Issue(
+                            f"charts/pattern-secrets/templates/{tmpl.name}", "warning",
+                            f"ExternalSecret uses {api_ver} — recommend external-secrets.io/v1",
+                        ))
+
+    # ignoreDifferences entries must have kind and jsonPointers
+    for name, app in remote_apps.items():
+        for i, diff in enumerate(app.get("ignoreDifferences", [])):
+            if "kind" not in diff:
+                issues.append(Issue(
+                    "values-hub.yaml", "error",
+                    f"App '{name}' ignoreDifferences[{i}] missing 'kind'",
+                ))
+            if "jsonPointers" not in diff:
+                issues.append(Issue(
+                    "values-hub.yaml", "error",
+                    f"App '{name}' ignoreDifferences[{i}] missing 'jsonPointers'",
+                ))
+
+    return issues
+
+
 # ── LLM review ──────────────────────────────────────────────────────
 
 
@@ -423,7 +485,7 @@ VALIDATION_REVIEW_SCHEMA = {
 }
 
 
-def _llm_review(out: Path, llm: LLMCallable) -> list:
+def _llm_review(out: Path, llm: Provider) -> list:
     """Ask the LLM to review generated files against the validation checklist."""
     files_content = []
     for fname in ("values-global.yaml", "values-hub.yaml", "values-secret.yaml.template", "Makefile"):
@@ -438,17 +500,17 @@ def _llm_review(out: Path, llm: LLMCallable) -> list:
     user_msg = "Review these pattern files:\n\n" + "\n\n".join(files_content)
 
     try:
-        result = llm(
+        response = llm.complete(
             VALIDATION_CHECKLIST, user_msg,
             response_schema=VALIDATION_REVIEW_SCHEMA,
         )
     except Exception as e:
         return [Issue("", "warning", f"LLM review failed: {e}")]
 
-    if isinstance(result, dict):
-        return _parse_structured_review(result)
+    if response.parsed:
+        return _parse_structured_review(response.parsed)
 
-    return _parse_text_review(result)
+    return _parse_text_review(response.content)
 
 
 def _parse_structured_review(data: dict) -> list:

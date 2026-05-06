@@ -10,9 +10,10 @@ from . import __version__
 from .analyzer import QuickstartAnalyzer
 from .config import get as cfg
 from .generator import build_report
-from .llm import make_llm
+from .providers import make_provider
 from .operators import OPERATORS
-from .pipeline import transform, skill_analyze, create_from_spec, TransformResult
+from .pipeline import transform, transform_remote, skill_analyze, create_from_spec, TransformResult
+from .profile import load_profile
 from .readiness import check_readiness
 from .registry import (
     fetch_registry, resolve_name, check_dependency_freshness,
@@ -66,6 +67,22 @@ def main():
         help='Use defaults, skip interactive prompts',
     )
     _add_llm_args(create_p)
+    _add_transform_args(create_p)
+
+    # transform subcommand
+    transform_p = subparsers.add_parser(
+        'transform', help='Apply Layer 2 chart transformations to a pattern'
+    )
+    transform_p.add_argument(
+        'path', help='Path to pattern directory'
+    )
+    transform_p.add_argument(
+        '--rules', help='Comma-separated rules: secrets,hooks,registry (default: all)',
+    )
+    transform_p.add_argument(
+        '--dry-run', action='store_true',
+        help='Show what would be changed without writing',
+    )
 
     # new subcommand
     new_p = subparsers.add_parser(
@@ -92,6 +109,17 @@ def main():
         help='Continue on failure instead of stopping',
     )
     _add_llm_args(batch_p)
+
+    # update subcommand
+    update_p = subparsers.add_parser(
+        'update', help='Update a remote-strategy pattern from its upstream quickstart'
+    )
+    update_p.add_argument('path', help='Path to pattern directory')
+    update_p.add_argument(
+        '--force', action='store_true',
+        help='Regenerate even if no upstream changes detected',
+    )
+    _add_llm_args(update_p)
 
     # check-ready subcommand
     ready_p = subparsers.add_parser(
@@ -127,10 +155,26 @@ def main():
         cmd_new(args)
     elif args.command == 'batch':
         cmd_batch(args)
+    elif args.command == 'update':
+        cmd_update(args)
     elif args.command == 'check-ready':
         cmd_check_ready(args)
+    elif args.command == 'transform':
+        cmd_transform(args)
     elif args.command == 'validate':
         cmd_validate(args)
+
+
+def _add_transform_args(parser):
+    """Add chart transform options to a subparser."""
+    parser.add_argument(
+        '--transform', action='store_true',
+        help='Apply Layer 2 chart transformations (secret externalization, etc.)',
+    )
+    parser.add_argument(
+        '--transform-rules',
+        help='Comma-separated transform rules: secrets,hooks,registry (default: all)',
+    )
 
 
 def _add_llm_args(parser):
@@ -227,36 +271,62 @@ def cmd_create(args):
     print_analysis(analysis)
 
     if args.non_interactive or args.llm != 'none':
-        # Pipeline mode: use transform() directly
-        llm = make_llm(args.llm, model=args.model or None,
-                        base_url=getattr(args, 'llm_url', None))
-        config = build_default_config(analysis, args)
-        result = transform(
-            quickstart_path=path,
-            output_dir=config['output_dir'],
-            pattern_name=config['pattern_name'],
-            llm=llm,
-            use_vault=config['use_vault'],
-            chart_strategy=config['chart_strategy'],
-            extra_config={k: v for k, v in config.items()
-                          if k in ('tier',)},
-        )
+        # Pipeline mode
+        llm = make_provider({
+            "provider": args.llm,
+            "model": args.model or None,
+            "base_url": getattr(args, "llm_url", None),
+        })
+        config = build_default_config(analysis, args, path)
+
+        if config['chart_strategy'] == 'remote':
+            result = transform_remote(
+                quickstart_path=path,
+                output_dir=config['output_dir'],
+                pattern_name=config['pattern_name'],
+                llm=llm,
+            )
+        else:
+            tx_rules = None
+            if getattr(args, 'transform_rules', None):
+                tx_rules = [r.strip() for r in args.transform_rules.split(',')]
+            result = transform(
+                quickstart_path=path,
+                output_dir=config['output_dir'],
+                pattern_name=config['pattern_name'],
+                llm=llm,
+                use_vault=config['use_vault'],
+                chart_strategy=config['chart_strategy'],
+                extra_config={k: v for k, v in config.items()
+                              if k in ('tier',)},
+                enable_transform=getattr(args, 'transform', False),
+                transform_rules=tx_rules,
+            )
         _print_transform_result(result)
         sys.exit(0 if result.success else 1)
     else:
         # Interactive mode
         config = interactive_config(analysis, args)
-        extra_keys = ('tier', 'secret_config', 'namespace_overrides', 'global_options')
-        extra = {k: config[k] for k in extra_keys if k in config}
-        result = transform(
-            quickstart_path=path,
-            output_dir=config['output_dir'],
-            pattern_name=config['pattern_name'],
-            use_vault=config['use_vault'],
-            chart_strategy=config['chart_strategy'],
-            extra_config=extra or None,
-        )
-        print_results(result.config or config)
+
+        if config['chart_strategy'] == 'remote':
+            result = transform_remote(
+                quickstart_path=path,
+                output_dir=config['output_dir'],
+                pattern_name=config['pattern_name'],
+            )
+            _print_transform_result(result)
+        else:
+            extra_keys = ('tier', 'secret_config', 'namespace_overrides', 'global_options')
+            extra = {k: config[k] for k in extra_keys if k in config}
+            result = transform(
+                quickstart_path=path,
+                output_dir=config['output_dir'],
+                pattern_name=config['pattern_name'],
+                use_vault=config['use_vault'],
+                chart_strategy=config['chart_strategy'],
+                extra_config=extra or None,
+            )
+            print_results(result.config or config)
 
 
 def cmd_new(args):
@@ -299,8 +369,11 @@ def cmd_batch(args):
         print("No matching quickstarts found.")
         sys.exit(0)
 
-    llm = make_llm(args.llm, model=args.model or None,
-                    base_url=getattr(args, 'llm_url', None))
+    llm = make_provider({
+        "provider": args.llm,
+        "model": args.model or None,
+        "base_url": getattr(args, "llm_url", None),
+    })
 
     output_root = Path(args.output or args.patterns_dir)
     results = []
@@ -391,6 +464,76 @@ def cmd_check_ready(args):
         print("No issues found.")
 
     sys.exit(0 if result.ready else 1)
+
+
+def cmd_transform(args):
+    """Apply Layer 2 chart transformations to a generated pattern."""
+    from .transformer import transform_chart as tx_chart, ALL_RULES
+
+    pattern_dir = Path(args.path)
+    charts_dir = pattern_dir / 'charts' / 'all'
+    if not charts_dir.is_dir():
+        print(f"Error: No charts/all/ directory in {args.path}", file=sys.stderr)
+        sys.exit(1)
+
+    rules = None
+    if args.rules:
+        rules = [r.strip() for r in args.rules.split(',')]
+        invalid = set(rules) - set(ALL_RULES)
+        if invalid:
+            print(f"Error: Unknown rules: {invalid}. Valid: {ALL_RULES}",
+                  file=sys.stderr)
+            sys.exit(1)
+
+    # Analyze each chart in the pattern
+    total_result = tx_chart.__class__.__bases__  # just need the import
+    from .transformer import TransformResult
+    total = TransformResult()
+
+    for chart_path in sorted(charts_dir.iterdir()):
+        if not chart_path.is_dir():
+            continue
+        chart_yaml = chart_path / 'Chart.yaml'
+        if not chart_yaml.exists():
+            continue
+
+        # Build a minimal analysis from the chart
+        analyzer = QuickstartAnalyzer(str(chart_path))
+        try:
+            analysis = analyzer.analyze()
+        except FileNotFoundError:
+            continue
+
+        chart_info = analysis.charts[0] if analysis.charts else None
+
+        if args.dry_run:
+            print(f"Would transform: {chart_path.name}")
+            if rules:
+                print(f"  Rules: {', '.join(rules)}")
+            else:
+                print(f"  Rules: {', '.join(ALL_RULES)}")
+            if analysis.detected_secrets:
+                print(f"  Secrets detected: {len(analysis.detected_secrets)}")
+            continue
+
+        result = tx_chart(str(chart_path), analysis, chart_info, rules=rules)
+        total.merge(result)
+
+        if result.rules_applied:
+            print(f"Transformed: {chart_path.name}")
+            for r in result.rules_applied:
+                print(f"  Rule: {r}")
+            for f in result.files_modified:
+                print(f"  Modified: {f}")
+            for f in result.files_created:
+                print(f"  Created: {f}")
+        for w in result.warnings:
+            print(f"  Warning: {w}")
+
+    if not args.dry_run:
+        print(f"\nRules applied: {len(total.rules_applied)}")
+        print(f"Files modified: {len(total.files_modified)}")
+        print(f"Files created: {len(total.files_created)}")
 
 
 def print_analysis(analysis):
@@ -566,8 +709,14 @@ def interactive_config(analysis, args):
     print("\nChart inclusion strategy:")
     print("  1. Local    - Copy chart into pattern repository")
     print("  2. External - Reference chart from Helm repository")
-    strategy = ask("Choose", "1")
-    config['chart_strategy'] = 'external' if strategy == '2' else 'local'
+    print("  3. Remote   - Track upstream Git repository (recommended)")
+    strategy = ask("Choose", "3")
+    if strategy == '2':
+        config['chart_strategy'] = 'external'
+    elif strategy == '3':
+        config['chart_strategy'] = 'remote'
+    else:
+        config['chart_strategy'] = 'local'
 
     if config['chart_strategy'] == 'external':
         default_repo = ''
@@ -577,6 +726,12 @@ def interactive_config(analysis, args):
                 break
         config['chart_repo_url'] = ask("Helm repository URL", default_repo)
         config['chart_version'] = ask("Chart version", analysis.version)
+    elif config['chart_strategy'] == 'remote':
+        analyzer = QuickstartAnalyzer(resolve_path(args.path))
+        git_url, chart_path_in_repo = analyzer.detect_git_origin()
+        config['git_repo_url'] = ask("Git repository URL", git_url)
+        config['chart_path_in_repo'] = ask("Chart path in repo", chart_path_in_repo)
+        config['chart_branch'] = ask("Git branch", "main")
 
     # Vault
     config['use_vault'] = ask_yes_no(
@@ -604,14 +759,59 @@ def interactive_config(analysis, args):
     return config
 
 
-def build_default_config(analysis, args):
+def cmd_update(args):
+    """Update a remote-strategy pattern from its upstream quickstart."""
+    print("=== QuickPat: Update Pattern ===\n")
+
+    pattern_dir = args.path
+    profile = load_profile(pattern_dir)
+    if not profile:
+        print("Error: No profile found. Run 'quickpat create' first.", file=sys.stderr)
+        sys.exit(1)
+
+    if not profile.source_repo_url:
+        print("Error: Profile has no source_repo_url. Not a remote-strategy pattern.",
+              file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Source: {profile.source_repo_url}")
+    print(f"Chart path: {profile.source_chart_path}")
+
+    # Clone upstream
+    qs_path = _clone(profile.source_repo_url)
+
+    llm = make_provider({
+        "provider": args.llm,
+        "model": args.model or None,
+        "base_url": getattr(args, "llm_url", None),
+    })
+
+    result = transform_remote(
+        quickstart_path=qs_path,
+        output_dir=pattern_dir,
+        llm=llm,
+    )
+    _print_transform_result(result)
+    sys.exit(0 if result.success else 1)
+
+
+def build_default_config(analysis, args, quickstart_path=None):
     name = args.name or f"{analysis.name}-pattern"
+
+    # Detect git origin to decide default strategy
+    strategy = 'local'
+    if quickstart_path:
+        analyzer = QuickstartAnalyzer(quickstart_path)
+        git_url, _ = analyzer.detect_git_origin()
+        if git_url:
+            strategy = 'remote'
+
     return {
         'pattern_name': name,
         'app_name': analysis.name,
         'app_namespace': analysis.name,
         'operators': list(analysis.detected_operators),
-        'chart_strategy': 'local',
+        'chart_strategy': strategy,
         'use_vault': bool(analysis.detected_secrets),
         'output_dir': args.output or str(Path(args.patterns_dir) / name),
         'clustergroup_version': '0.9.*',
@@ -656,8 +856,11 @@ def print_results(config):
 
 def cmd_validate(args):
     """Validate a generated pattern."""
-    llm = make_llm(args.llm, model=args.model or None,
-                    base_url=getattr(args, 'llm_url', None))
+    llm = make_provider({
+        "provider": args.llm,
+        "model": args.model or None,
+        "base_url": getattr(args, "llm_url", None),
+    })
     if args.fix:
         result = validate_and_fix(
             args.path, llm=llm, max_iterations=args.max_iterations,

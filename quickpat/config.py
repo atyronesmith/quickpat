@@ -4,7 +4,6 @@ Loads settings from quickpat.yaml (project root) or
 ~/.config/quickpat/config.yaml, with env var overrides.
 """
 
-import os
 from pathlib import Path
 
 import yaml
@@ -13,16 +12,18 @@ import yaml
 DEFAULTS = {
     "llm": {
         "provider": "none",
-        "openai": {"api_key": "", "model": "gpt-4o-mini"},
-        "anthropic": {"api_key": "", "model": "claude-sonnet-4-20250514"},
+        "openai": {"model": "gpt-4o-mini"},
+        "anthropic": {"model": "claude-sonnet-4-20250514"},
         "ollama": {"model": "llama3.1", "base_url": "http://localhost:11434"},
         "vllm": {"model": "default", "base_url": "http://localhost:8000"},
-        "deepinfra": {"api_key": "", "model": "Qwen/Qwen2.5-72B-Instruct"},
+        "deepinfra": {"model": "Qwen/Qwen2.5-72B-Instruct"},
     },
     "pattern": {
         "output_dir": "~/patterns",
         "chart_strategy": "local",
         "clustergroup_version": "0.9.*",
+        "default_vault_prefix": "hub",
+        "subchart_cache_dir": "~/.cache/quickpat/charts",
     },
     "infrastructure": {
         "vault_chart_version": "0.1.*",
@@ -41,13 +42,6 @@ DEFAULTS = {
         "timeout": 10,
     },
     "platforms": ["AWS", "Azure", "GCP", "IBMCloud", "None"],
-}
-
-# Env vars that override config file values
-_ENV_MAP = {
-    "OPENAI_API_KEY": ("llm", "openai", "api_key"),
-    "ANTHROPIC_API_KEY": ("llm", "anthropic", "api_key"),
-    "DEEPINFRA_API_KEY": ("llm", "deepinfra", "api_key"),
 }
 
 _config = None
@@ -89,15 +83,6 @@ def load_config(path=None):
         _config = _deep_merge(DEFAULTS, user_config)
     else:
         _config = _deep_merge({}, DEFAULTS)
-
-    # Env vars override config file
-    for env_var, key_path in _ENV_MAP.items():
-        val = os.environ.get(env_var)
-        if val:
-            d = _config
-            for key in key_path[:-1]:
-                d = d.setdefault(key, {})
-            d[key_path[-1]] = val
 
     return _config
 

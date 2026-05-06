@@ -61,31 +61,28 @@ def _probe_local_server(base_url):
 
 def probe_providers():
     """Discover available LLM providers. 'none' is always available."""
-    from quickpat.llm import (
-        make_anthropic_llm, make_deepinfra_llm, make_ollama_llm,
-        make_openai_llm, make_vllm_llm,
-    )
+    from quickpat.providers import make_provider
 
     providers = [("none", "deterministic", None)]
 
     if os.environ.get("ANTHROPIC_API_KEY"):
         try:
             model = cfg("llm.anthropic.model", "claude-sonnet-4-20250514")
-            providers.append(("anthropic", model, make_anthropic_llm()))
+            providers.append(("anthropic", model, make_provider({"provider": "anthropic"})))
         except Exception:
             pass
 
     if os.environ.get("OPENAI_API_KEY"):
         try:
             model = cfg("llm.openai.model", "gpt-4o-mini")
-            providers.append(("openai", model, make_openai_llm()))
+            providers.append(("openai", model, make_provider({"provider": "openai"})))
         except Exception:
             pass
 
     if os.environ.get("DEEPINFRA_API_KEY"):
         try:
             model = cfg("llm.deepinfra.model", "Qwen/Qwen2.5-72B-Instruct")
-            providers.append(("deepinfra", model, make_deepinfra_llm()))
+            providers.append(("deepinfra", model, make_provider({"provider": "deepinfra"})))
         except Exception:
             pass
 
@@ -94,7 +91,7 @@ def probe_providers():
     if _probe_local_server(ollama_url):
         try:
             model = cfg("llm.ollama.model", "llama3.1")
-            providers.append(("ollama", model, make_ollama_llm()))
+            providers.append(("ollama", model, make_provider({"provider": "ollama"})))
         except Exception:
             pass
 
@@ -102,7 +99,7 @@ def probe_providers():
     if _probe_local_server(vllm_url):
         try:
             model = cfg("llm.vllm.model", "default")
-            providers.append(("vllm", model, make_vllm_llm()))
+            providers.append(("vllm", model, make_provider({"provider": "vllm"})))
         except Exception:
             pass
 

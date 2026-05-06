@@ -3,33 +3,69 @@
 # Copy this file to quickpat.yaml and edit as needed.
 # Alternatively, place at ~/.config/quickpat/config.yaml for user-level config.
 #
-# Environment variables (OPENAI_API_KEY, ANTHROPIC_API_KEY, DEEPINFRA_API_KEY)
-# override the corresponding api_key values below.
+# API keys are read from environment variables — never put real keys in this file.
+#   OPENAI_API_KEY, ANTHROPIC_API_KEY, DEEPINFRA_API_KEY
 
 # ── LLM Provider ────────────────────────────────────────────────────
+#
+# Set "provider" to one of: none, openai, anthropic, ollama, vllm, deepinfra
+# Then configure the matching section below.
+# CLI flags --llm / --model / --llm-url override these values.
+#
+# Examples follow — uncomment the one that fits your setup.
+
+# ── Example 1: No LLM (default — deterministic pipeline only) ──────
 llm:
-  # Default provider: none, openai, anthropic, ollama, vllm, deepinfra
   provider: none
 
-  openai:
-    api_key: ""
-    model: gpt-4o-mini
+# ── Example 2: Anthropic (Claude via API) ──────────────────────────
+# Set ANTHROPIC_API_KEY in your environment, then:
+#
+# llm:
+#   provider: anthropic
+#   anthropic:
+#     model: claude-sonnet-4-20250514
 
-  anthropic:
-    api_key: ""
-    model: claude-sonnet-4-20250514
+# ── Example 3: Local Ollama ────────────────────────────────────────
+# Start Ollama on your machine (`ollama serve`), pull a model, then:
+#
+# llm:
+#   provider: ollama
+#   ollama:
+#     model: llama3.1
+#     base_url: http://localhost:11434
 
-  ollama:
-    model: llama3.1
-    base_url: http://localhost:11434
+# ── Example 4: Remote Ollama ──────────────────────────────────────
+# Point to an Ollama instance on another host:
+#
+# llm:
+#   provider: ollama
+#   ollama:
+#     model: llama3.1
+#     base_url: http://gpu-server.example.com:11434
 
-  vllm:
-    model: default
-    base_url: http://localhost:8000
+# ── Example 5: DeepInfra ──────────────────────────────────────────
+# Set DEEPINFRA_API_KEY in your environment, then:
+#
+# llm:
+#   provider: deepinfra
+#   deepinfra:
+#     model: Qwen/Qwen2.5-72B-Instruct
 
-  deepinfra:
-    api_key: ""
-    model: Qwen/Qwen2.5-72B-Instruct
+# ── Example 6: vLLM (self-hosted OpenAI-compatible server) ────────
+# llm:
+#   provider: vllm
+#   vllm:
+#     model: default
+#     base_url: http://localhost:8000
+
+# ── Example 7: OpenAI ─────────────────────────────────────────────
+# Set OPENAI_API_KEY in your environment, then:
+#
+# llm:
+#   provider: openai
+#   openai:
+#     model: gpt-4o-mini
 
 # ── Pattern Generation ──────────────────────────────────────────────
 pattern:

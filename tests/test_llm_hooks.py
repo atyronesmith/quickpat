@@ -7,24 +7,44 @@ from quickpat.pipeline import (
     _llm_review_secrets,
     skill_analyze,
 )
+from quickpat.providers.base import LLMResponse
 from quickpat.validator import _llm_review, _parse_structured_review, _parse_text_review, Issue
 from tests.conftest import write_chart, write_values
 
 
+class _MockStructuredProvider:
+    """Mock provider that returns structured output when schema is passed."""
+    def __init__(self, response_dict):
+        self._response = response_dict
+
+    def complete(self, system, prompt, **kwargs):
+        if kwargs.get("response_schema"):
+            return LLMResponse(
+                content=str(self._response), model="mock", provider="mock",
+                parsed=self._response,
+            )
+        return LLMResponse(
+            content=str(self._response), model="mock", provider="mock",
+        )
+
+
+class _MockTextProvider:
+    """Mock provider that always returns text (no structured output support)."""
+    def __init__(self, response_text):
+        self._text = response_text
+
+    def complete(self, system, prompt, **kwargs):
+        return LLMResponse(
+            content=self._text, model="mock", provider="mock",
+        )
+
+
 def _mock_structured_llm(response_dict):
-    """Create a mock LLM that returns structured output when schema is passed."""
-    def call(system, user, response_schema=None):
-        if response_schema:
-            return response_dict
-        return str(response_dict)
-    return call
+    return _MockStructuredProvider(response_dict)
 
 
 def _mock_text_llm(response_text):
-    """Create a mock LLM that always returns text (no structured output support)."""
-    def call(system, user, response_schema=None):
-        return response_text
-    return call
+    return _MockTextProvider(response_text)
 
 
 class TestOperatorCheckStructured:
@@ -181,6 +201,12 @@ class TestValidationReviewStructured:
         assert result[0].file == "values-global.yaml"
 
 
+class _BadProvider:
+    """Mock provider that always raises."""
+    def complete(self, system, prompt, **kwargs):
+        raise ConnectionError("API down")
+
+
 class TestLLMExceptionHandling:
     def test_operator_check_handles_exception(self, tmp_path):
         chart = tmp_path / "helm"
@@ -188,10 +214,7 @@ class TestLLMExceptionHandling:
         write_values(chart, {"replicas": 3})
         analysis = skill_analyze(str(tmp_path))
 
-        def bad_llm(system, user, response_schema=None):
-            raise ConnectionError("API down")
-
-        result = _llm_check_operators(bad_llm, analysis)
+        result = _llm_check_operators(_BadProvider(), analysis)
         assert result == []
 
     def test_secret_review_handles_exception(self, tmp_path):
@@ -200,18 +223,12 @@ class TestLLMExceptionHandling:
         write_values(chart, {"password": "x"})
         analysis = skill_analyze(str(tmp_path))
 
-        def bad_llm(system, user, response_schema=None):
-            raise ConnectionError("API down")
-
-        result = _llm_review_secrets(bad_llm, analysis)
+        result = _llm_review_secrets(_BadProvider(), analysis)
         assert result == ""
 
     def test_validation_review_handles_exception(self, tmp_path):
         (tmp_path / "values-global.yaml").write_text("global: {}\n")
 
-        def bad_llm(system, user, response_schema=None):
-            raise ConnectionError("API down")
-
-        result = _llm_review(tmp_path, bad_llm)
+        result = _llm_review(tmp_path, _BadProvider())
         assert len(result) == 1
         assert "failed" in result[0].message.lower()

@@ -1,7 +1,5 @@
 """Tests for quickpat.config."""
 
-import os
-
 import yaml
 
 from quickpat import config
@@ -46,8 +44,6 @@ class TestConfigFile:
         cfg = config.load_config(path=str(cfg_file))
         # Overridden
         assert cfg["llm"]["deepinfra"]["model"] == "meta-llama/Llama-3.1-70B-Instruct"
-        # Other deepinfra defaults preserved
-        assert cfg["llm"]["deepinfra"]["api_key"] == ""
 
     def test_custom_platforms(self, tmp_path):
         cfg_file = tmp_path / "quickpat.yaml"
@@ -56,19 +52,3 @@ class TestConfigFile:
         }))
         cfg = config.load_config(path=str(cfg_file))
         assert cfg["platforms"] == ["AWS", "GCP"]
-
-
-class TestEnvOverrides:
-    def test_env_overrides_config(self, tmp_path, monkeypatch):
-        cfg_file = tmp_path / "quickpat.yaml"
-        cfg_file.write_text(yaml.dump({
-            "llm": {"openai": {"api_key": "from-file"}},
-        }))
-        monkeypatch.setenv("OPENAI_API_KEY", "from-env")
-        cfg = config.load_config(path=str(cfg_file))
-        assert cfg["llm"]["openai"]["api_key"] == "from-env"
-
-    def test_env_overrides_default(self, monkeypatch):
-        monkeypatch.setenv("DEEPINFRA_API_KEY", "di-key-123")
-        cfg = config.load_config(path="/nonexistent")
-        assert cfg["llm"]["deepinfra"]["api_key"] == "di-key-123"

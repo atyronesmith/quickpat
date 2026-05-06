@@ -3,6 +3,16 @@
 import pytest
 import yaml
 
+from quickpat import config
+
+
+@pytest.fixture(autouse=True)
+def _reset_config():
+    """Reset global config state between tests."""
+    config._config = None
+    yield
+    config._config = None
+
 
 def write_chart(path, name, version="0.1.0", description="", dependencies=None):
     """Create a minimal Chart.yaml."""
