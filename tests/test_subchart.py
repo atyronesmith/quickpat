@@ -9,6 +9,8 @@ from quickpat.subchart import (
     SecretGate,
     ComputedField,
     analyze_subchart,
+    strip_go_templates,
+    extract_resource_types_from_templates,
     _detect_secret_gates,
     _detect_env_secret_refs,
     _extract_resource_types,
@@ -444,3 +446,185 @@ class TestAnalyzeSubchart:
         info = analyze_subchart(tmp_path)
         assert info.name == ""
         assert info.secret_fields == []
+
+
+# ── Go Template Stripping ──────────────────────────────────────────
+
+
+class TestStripGoTemplates:
+    def test_inline_expression(self):
+        content = 'name: {{ .Values.name }}\n'
+        result = strip_go_templates(content)
+        assert '{{' not in result
+        assert '__TMPL__' in result
+
+    def test_trimmed_expression(self):
+        content = 'name: {{- .Values.name -}}\n'
+        result = strip_go_templates(content)
+        assert '{{' not in result
+        assert '__TMPL__' in result
+
+    def test_block_directives_become_comments(self):
+        content = (
+            '{{- if .Values.enabled }}\n'
+            'apiVersion: v1\n'
+            'kind: Service\n'
+            '{{- end }}\n'
+        )
+        result = strip_go_templates(content)
+        assert 'apiVersion: v1' in result
+        assert 'kind: Service' in result
+        assert '{{ if' not in result
+        assert '{{ end' not in result
+
+    def test_preserves_non_template_lines(self):
+        content = (
+            'apiVersion: route.openshift.io/v1\n'
+            'kind: Route\n'
+            'metadata:\n'
+            '  name: myroute'
+        )
+        assert strip_go_templates(content) == content
+
+    def test_mixed_content(self):
+        content = (
+            '{{- if .Values.route.create }}\n'
+            'apiVersion: route.openshift.io/v1\n'
+            'kind: Route\n'
+            'metadata:\n'
+            '  name: {{ .Release.Name }}-route\n'
+            '  labels:\n'
+            '    app: {{ .Values.app }}\n'
+            'spec:\n'
+            '  to:\n'
+            '    kind: Service\n'
+            '    name: {{ .Values.service.name }}\n'
+            '{{- end }}\n'
+        )
+        result = strip_go_templates(content)
+        assert 'apiVersion: route.openshift.io/v1' in result
+        assert 'kind: Route' in result
+        assert '{{' not in result
+
+    def test_range_directive(self):
+        content = (
+            '{{- range .Values.items }}\n'
+            'apiVersion: v1\n'
+            'kind: ConfigMap\n'
+            '{{- end }}\n'
+        )
+        result = strip_go_templates(content)
+        assert 'apiVersion: v1' in result
+        assert '{{ range' not in result
+
+
+# ── Resource Types from Go-Templated Files ─────────────────────────
+
+
+class TestExtractResourceTypesFromTemplates:
+    def test_extracts_route(self, tmp_path):
+        tmpl_dir = tmp_path / "templates"
+        tmpl_dir.mkdir()
+        (tmpl_dir / "route.yaml").write_text(
+            '{{- if .Values.route.enabled }}\n'
+            'apiVersion: route.openshift.io/v1\n'
+            'kind: Route\n'
+            'metadata:\n'
+            '  name: {{ .Release.Name }}\n'
+            'spec:\n'
+            '  to:\n'
+            '    kind: Service\n'
+            '{{- end }}\n'
+        )
+        result = extract_resource_types_from_templates(tmpl_dir)
+        assert ("route.openshift.io", "Route") in result
+
+    def test_skips_standard_kinds(self, tmp_path):
+        tmpl_dir = tmp_path / "templates"
+        tmpl_dir.mkdir()
+        (tmpl_dir / "deploy.yaml").write_text(
+            'apiVersion: apps/v1\n'
+            'kind: Deployment\n'
+            'metadata:\n'
+            '  name: {{ .Release.Name }}\n'
+        )
+        result = extract_resource_types_from_templates(tmpl_dir)
+        assert result == []
+
+    def test_multiple_crds(self, tmp_path):
+        tmpl_dir = tmp_path / "templates"
+        tmpl_dir.mkdir()
+        (tmpl_dir / "resources.yaml").write_text(
+            'apiVersion: route.openshift.io/v1\n'
+            'kind: Route\n'
+            'metadata:\n'
+            '  name: myroute\n'
+            '---\n'
+            'apiVersion: kubeflow.org/v1\n'
+            'kind: Notebook\n'
+            'metadata:\n'
+            '  name: mynotebook\n'
+        )
+        result = extract_resource_types_from_templates(tmpl_dir)
+        assert ("route.openshift.io", "Route") in result
+        assert ("kubeflow.org", "Notebook") in result
+
+    def test_dspa_crd(self, tmp_path):
+        tmpl_dir = tmp_path / "templates"
+        tmpl_dir.mkdir()
+        (tmpl_dir / "dspa.yaml").write_text(
+            '{{- if .Values.pipelines.enabled }}\n'
+            'apiVersion: datasciencepipelinesapplications.opendatahub.io/v1\n'
+            'kind: DataSciencePipelinesApplication\n'
+            'metadata:\n'
+            '  name: {{ .Values.name }}\n'
+            'spec:\n'
+            '  apiServer:\n'
+            '    deploy: true\n'
+            '{{- end }}\n'
+        )
+        result = extract_resource_types_from_templates(tmpl_dir)
+        assert (
+            "datasciencepipelinesapplications.opendatahub.io",
+            "DataSciencePipelinesApplication",
+        ) in result
+
+    def test_no_duplicates(self, tmp_path):
+        tmpl_dir = tmp_path / "templates"
+        tmpl_dir.mkdir()
+        (tmpl_dir / "r1.yaml").write_text(
+            'apiVersion: route.openshift.io/v1\nkind: Route\n'
+        )
+        (tmpl_dir / "r2.yaml").write_text(
+            'apiVersion: route.openshift.io/v1\nkind: Route\n'
+        )
+        result = extract_resource_types_from_templates(tmpl_dir)
+        assert len(result) == 1
+
+    def test_empty_dir(self, tmp_path):
+        tmpl_dir = tmp_path / "templates"
+        tmpl_dir.mkdir()
+        assert extract_resource_types_from_templates(tmpl_dir) == []
+
+    def test_nonexistent_dir(self, tmp_path):
+        assert extract_resource_types_from_templates(tmp_path / "nope") == []
+
+    def test_regex_fallback_on_unparseable(self, tmp_path):
+        tmpl_dir = tmp_path / "templates"
+        tmpl_dir.mkdir()
+        (tmpl_dir / "complex.yaml").write_text(
+            '{{- range $name, $config := .Values.models }}\n'
+            'apiVersion: serving.kserve.io/v1beta1\n'
+            'kind: InferenceService\n'
+            'metadata:\n'
+            '  name: {{ $name }}\n'
+            'spec:\n'
+            '  predictor:\n'
+            '    model:\n'
+            '      modelFormat:\n'
+            '        name: {{ $config.format }}\n'
+            '---\n'
+            '{{- end }}\n'
+        )
+        result = extract_resource_types_from_templates(tmpl_dir)
+        assert ("serving.kserve.io", "InferenceService") in result

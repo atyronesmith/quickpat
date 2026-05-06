@@ -6,6 +6,7 @@ from pathlib import Path
 import yaml
 
 from .operators import OPERATORS, resolve_co_dependencies
+from .subchart import extract_resource_types_from_templates
 
 SECRET_PATTERNS = [
     'token', 'key', 'password', 'secret', 'credential',
@@ -91,6 +92,7 @@ class QuickstartAnalysis:
     has_llm_service: bool = False
     has_vector_db: bool = False
     has_object_storage: bool = False
+    resource_types: list = field(default_factory=list)
 
 
 class QuickstartAnalyzer:
@@ -139,6 +141,12 @@ class QuickstartAnalyzer:
                 analysis.values.setdefault(key, val)
 
             search_texts.append(chart_text)
+
+            # Extract resource types from templates
+            tmpl_dir = chart_path / 'templates'
+            for rt in extract_resource_types_from_templates(tmpl_dir):
+                if rt not in analysis.resource_types:
+                    analysis.resource_types.append(rt)
 
         # Set top-level fields from first chart (single-chart) or repo name (multi-chart)
         if len(analysis.charts) == 1:
