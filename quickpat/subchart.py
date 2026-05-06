@@ -390,3 +390,104 @@ def _extract_secret_info(content: str, filename: str, info: SubChartInfo):
                     template=field_value,
                     source_fields=source_fields,
                 ))
+
+
+# ── Go Template Stripping ──────────────────────────────────────────
+
+_STANDARD_KINDS = frozenset({
+    'ConfigMap', 'Deployment', 'Job', 'CronJob', 'DaemonSet',
+    'HorizontalPodAutoscaler', 'Ingress', 'NetworkPolicy',
+    'PersistentVolumeClaim', 'Pod', 'ReplicaSet', 'Secret',
+    'Service', 'ServiceAccount', 'StatefulSet',
+})
+
+
+def strip_go_templates(content: str) -> str:
+    """Replace Go template expressions with YAML-safe placeholders.
+
+    Handles ``{{ ... }}``, ``{{- ... }}``, and ``{{- ... -}}`` variants.
+    Block directives (if/else/end/range/with/define/block) are replaced
+    with YAML comments so the body lines remain parseable.
+    """
+    lines = []
+    for line in content.splitlines():
+        stripped = line.lstrip()
+        # Lines that are purely a block directive → YAML comment
+        if re.match(r'\{\{-?\s*(if|else|end|range|with|define|block|template)\b', stripped):
+            indent = len(line) - len(stripped)
+            lines.append(' ' * indent + '# __TMPL_BLOCK__')
+            continue
+        # Inline expressions → placeholder string
+        line = re.sub(r'\{\{-?.*?-?\}\}', '__TMPL__', line)
+        lines.append(line)
+    return '\n'.join(lines)
+
+
+def extract_resource_types_from_templates(
+    templates_dir: Path,
+) -> list[tuple[str, str]]:
+    """Extract (apiGroup, kind) pairs from Go-templated Helm templates.
+
+    Strips Go template expressions, attempts YAML parsing, and falls
+    back to regex extraction on parse failure.  Skips standard K8s
+    resource types (Deployment, Service, etc.).
+    """
+    results: list[tuple[str, str]] = []
+
+    if not templates_dir.is_dir():
+        return results
+
+    for tmpl in templates_dir.glob('*.yaml'):
+        try:
+            raw = tmpl.read_text(errors='ignore')
+        except Exception:
+            continue
+
+        cleaned = strip_go_templates(raw)
+
+        pairs = _parse_resource_types_yaml(cleaned)
+        if not pairs:
+            pairs = _parse_resource_types_regex(raw)
+
+        for pair in pairs:
+            if pair[1] not in _STANDARD_KINDS and pair not in results:
+                results.append(pair)
+
+    return results
+
+
+def _parse_resource_types_yaml(content: str) -> list[tuple[str, str]]:
+    """Try to extract (group, kind) via YAML parsing."""
+    pairs = []
+    try:
+        for doc in yaml.safe_load_all(content):
+            if not isinstance(doc, dict):
+                continue
+            api_ver = doc.get('apiVersion', '')
+            kind = doc.get('kind', '')
+            if not api_ver or not kind or kind == '__TMPL__':
+                continue
+            api_ver = str(api_ver).replace('__TMPL__', '').strip('/')
+            kind = str(kind)
+            group = api_ver.rsplit('/', 1)[0] if '/' in api_ver else ''
+            pairs.append((group, kind))
+    except Exception:
+        pass
+    return pairs
+
+
+def _parse_resource_types_regex(content: str) -> list[tuple[str, str]]:
+    """Fallback: extract (group, kind) via regex on raw template text."""
+    api_versions = [
+        m.group(1).strip('"\'')
+        for m in re.finditer(r'apiVersion:\s*([^\s\n{]+)', content)
+    ]
+    kinds = [
+        m.group(1).strip('"\'')
+        for m in re.finditer(r'kind:\s*([^\s\n{]+)', content)
+    ]
+    pairs = []
+    for api_ver, kind in zip(api_versions, kinds):
+        group = api_ver.rsplit('/', 1)[0] if '/' in api_ver else ''
+        pairs.append((group, kind))
+    return pairs

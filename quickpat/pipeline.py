@@ -140,6 +140,41 @@ OVERRIDE_REVIEW_SCHEMA = {
 }
 
 
+# ── Static ArgoCD Ignore Rules ──────────────────────────────────────
+
+KNOWN_IGNORE_RULES: dict[tuple[str, str], list[str]] = {
+    ("route.openshift.io", "Route"): [
+        "/spec/host", "/spec/alternateBackends",
+    ],
+    ("kubeflow.org", "Notebook"): [
+        "/spec", "/metadata/annotations", "/metadata/labels",
+    ],
+    ("datasciencepipelinesapplications.opendatahub.io", "DataSciencePipelinesApplication"): [
+        "/spec",
+    ],
+    ("serving.kserve.io", "InferenceService"): [
+        "/metadata/annotations", "/metadata/labels",
+    ],
+    ("serving.knative.dev", "Service"): [
+        "/metadata/annotations", "/metadata/labels",
+    ],
+}
+
+
+def _static_drift_entries(resource_types: list) -> list[DriftEntry]:
+    """Return DriftEntry list from the static rules table."""
+    entries = []
+    for group, kind in resource_types:
+        pointers = KNOWN_IGNORE_RULES.get((group, kind))
+        if pointers:
+            entries.append(DriftEntry(
+                group=group, kind=kind,
+                json_pointers=list(pointers),
+                reason="known controller-mutated fields",
+            ))
+    return entries
+
+
 # ── Sub-skill: Analyze ──────────────────────────────────────────────
 
 
@@ -228,6 +263,21 @@ def transform(
                 f"LLM suggested additional operators: {sorted(added)}"
             )
 
+    # 3b. Predict ArgoCD drift from resource types
+    drift_entries = _static_drift_entries(analysis.resource_types)
+    if llm:
+        unknown = [
+            rt for rt in analysis.resource_types
+            if rt not in KNOWN_IGNORE_RULES
+        ]
+        if unknown:
+            llm_drift = _llm_predict_drift(llm, analysis, unknown)
+            drift_entries.extend(llm_drift)
+    if drift_entries:
+        result.llm_decisions.append(
+            f"Predicted {len(drift_entries)} ArgoCD drift entries"
+        )
+
     # 4. Build config
     config = {
         "pattern_name": pattern_name,
@@ -239,6 +289,11 @@ def transform(
         "output_dir": output_dir,
         "clustergroup_version": cfg("pattern.clustergroup_version", "0.9.*"),
     }
+    if drift_entries:
+        config['ignore_differences'] = [
+            {'group': d.group, 'kind': d.kind, 'jsonPointers': d.json_pointers}
+            for d in drift_entries
+        ]
     if extra_config:
         config.update(extra_config)
     result.config = config
@@ -469,15 +524,20 @@ def _build_new_profile(
                 source_fields=cf.source_fields,
             ))
 
-    # Predict drift
-    resource_types = []
+    # Predict drift — static rules first, LLM for unknowns
+    resource_types = list(analysis.resource_types)
     for sc_info in subchart_info.values():
-        resource_types.extend(sc_info.resource_types)
-    if llm and resource_types:
-        drift = _llm_predict_drift(llm, analysis, resource_types)
+        for rt in sc_info.resource_types:
+            if rt not in resource_types:
+                resource_types.append(rt)
+    drift = _static_drift_entries(resource_types)
+    unknown = [rt for rt in resource_types if rt not in KNOWN_IGNORE_RULES]
+    if llm and unknown:
+        drift.extend(_llm_predict_drift(llm, analysis, unknown))
+    if drift:
         profile.drift_entries = drift
         result.llm_decisions.append(
-            f"Predicted {len(drift)} ArgoCD drift entries via LLM"
+            f"Predicted {len(drift)} ArgoCD drift entries"
         )
 
     # Build overrides from secret gates
