@@ -2,7 +2,7 @@
 
 Convert [Red Hat AI Quickstarts](https://github.com/rh-ai-quickstart) into [Validated Patterns](https://validatedpatterns.io/) — production-ready, GitOps-driven OpenShift deployments.
 
-QuickPat analyzes an AI Quickstart's Helm chart, detects required operators, secrets, and GPU requirements, then generates a complete Validated Pattern directory that can be deployed with `./pattern.sh make install`.
+QuickPat analyzes Helm charts, detects required operators, secrets, and GPU requirements, then generates a complete Validated Pattern directory that can be deployed with `./pattern.sh make install`.
 
 ## What It Does
 
@@ -12,9 +12,7 @@ A typical AI Quickstart ships a Helm chart meant for `helm install`. A Validated
 - **HashiCorp Vault integration** — secrets managed via the VP secrets framework (`values-secret.yaml.template`)
 - **Multi-cloud support** — platform-specific overrides for AWS, Azure, GCP, IBM Cloud
 - **GitOps via ArgoCD** — declarative, drift-free cluster state
-- **Multisource configuration** — infrastructure charts pulled from the upstream VP registry (no fork of multicloud-gitops required)
-
-QuickPat automates the conversion so you don't have to manually create a dozen boilerplate files and figure out the correct YAML structure.
+- **Multisource configuration** — infrastructure charts pulled from the upstream VP registry
 
 ## Installation
 
@@ -40,29 +38,44 @@ Or use the wrapper script:
 
 ## Quick Start
 
-### Analyze a Quickstart
+### List Available Quickstarts
 
-Inspect a quickstart to see what QuickPat detects — operators, dependencies, secrets, GPU requirements:
+```bash
+quickpat list
+```
+
+### Analyze a Quickstart
 
 ```bash
 quickpat analyze /path/to/quickstart
-
-# Or directly from GitHub
 quickpat analyze https://github.com/rh-ai-quickstart/RAG
+quickpat analyze RAG   # resolve by registry name
 ```
 
 ### Create a Validated Pattern
 
-Generate all pattern files interactively:
+Interactive mode (guided questionnaire):
 
 ```bash
-quickpat create /path/to/quickstart
+quickpat create RAG
 ```
 
-Or non-interactively with defaults:
+Non-interactive with defaults:
 
 ```bash
-quickpat create https://github.com/rh-ai-quickstart/RAG --non-interactive
+quickpat create RAG --non-interactive
+```
+
+With LLM-enhanced detection:
+
+```bash
+quickpat create RAG --llm openai
+```
+
+### Create from Spec (No Quickstart Source)
+
+```bash
+quickpat new spec.yaml -o /tmp/my-pattern
 ```
 
 ### Deploy
@@ -78,26 +91,147 @@ oc login <cluster>
 
 ```
 quickpat [--patterns-dir DIR] <command> [options]
-
-Commands:
-  analyze    Analyze an AI Quickstart (detect operators, secrets, features)
-  create     Generate a complete Validated Pattern from a Quickstart
-
-Global Options:
-  --patterns-dir DIR   Root directory for generated patterns (default: ~/patterns)
-  --version            Show version
-
-analyze options:
-  path                 Path or GitHub URL to AI Quickstart
-  --output, -o DIR     Output directory
-  --name NAME          Pattern name override
-
-create options:
-  path                 Path or GitHub URL to AI Quickstart
-  --output, -o DIR     Output directory
-  --name NAME          Pattern name override
-  --non-interactive    Use defaults, skip prompts
 ```
+
+### Global Options
+
+| Option | Description |
+|--------|-------------|
+| `--patterns-dir DIR` | Root directory for generated patterns (default: `~/patterns`) |
+| `--version` | Show version |
+
+### Commands
+
+#### `quickpat list`
+
+List available AI Quickstarts from the [ai-quickstart-pub](https://github.com/rh-ai-quickstart/ai-quickstart-pub) registry.
+
+#### `quickpat analyze <path>`
+
+Analyze a quickstart — detect operators, dependencies, secrets, features, stale deps, and local forks.
+
+| Option | Description |
+|--------|-------------|
+| `path` | Path, GitHub URL, or registry name |
+| `--output, -o DIR` | Output directory |
+| `--name NAME` | Pattern name override |
+
+#### `quickpat create <path>`
+
+Generate a complete Validated Pattern from a quickstart source. In interactive mode, prompts for pattern tier, operator selection, namespace overrides, secret classification, chart strategy, vault, and global options.
+
+| Option | Description |
+|--------|-------------|
+| `path` | Path, GitHub URL, or registry name |
+| `--output, -o DIR` | Output directory |
+| `--name NAME` | Pattern name override |
+| `--non-interactive` | Use defaults, skip prompts |
+| `--llm PROVIDER` | LLM provider for enhanced detection |
+| `--model NAME` | Model name override |
+| `--llm-url URL` | Base URL for ollama/vllm |
+
+#### `quickpat new <spec.yaml>`
+
+Create a Validated Pattern from a declarative spec YAML — no quickstart source needed. See [Spec YAML Format](#spec-yaml-format).
+
+| Option | Description |
+|--------|-------------|
+| `spec` | Path to spec YAML file |
+| `--output, -o DIR` | Output directory |
+| `--name NAME` | Pattern name override |
+| `--non-interactive` | Use defaults, skip prompts |
+
+#### `quickpat batch`
+
+Transform all registered quickstarts in bulk.
+
+| Option | Description |
+|--------|-------------|
+| `--output, -o DIR` | Root output directory |
+| `--filter NAME` | Only process quickstarts matching this substring |
+| `--keep-going` | Continue on failure instead of stopping |
+| `--llm PROVIDER` | LLM provider |
+
+#### `quickpat check-ready <path>`
+
+Check if a quickstart is publication-ready against the [ai-quickstart-pub](https://github.com/rh-ai-quickstart/ai-quickstart-pub) criteria. Checks README, LICENSE, Chart.yaml fields, values.yaml, templates, hardcoded image tags, stale dependencies, local forks, .gitignore, and sensitive files.
+
+| Option | Description |
+|--------|-------------|
+| `path` | Path, GitHub URL, or registry name |
+
+#### `quickpat validate <path>`
+
+Validate a generated pattern for structural correctness. With `--fix`, runs a self-correcting loop that auto-repairs common issues.
+
+| Option | Description |
+|--------|-------------|
+| `path` | Path to pattern directory |
+| `--fix` | Auto-fix issues |
+| `--max-iterations N` | Max auto-fix iterations (default: 3) |
+| `--llm PROVIDER` | LLM provider for enhanced validation |
+
+Auto-fixable issues include missing `multiSourceConfig.enabled`, `main:` incorrectly nested under `global:`, missing `clusterGroupChartVersion`, deprecated `vaultPrefixOverride`, wrong `version: "2.0"` in secrets template, legacy Makefile includes, missing executable bit on `pattern.sh`, wrong chart paths, and missing `overrides/` directory.
+
+## Spec YAML Format
+
+The `quickpat new` command accepts a declarative spec file. All fields except `name` are optional.
+
+```yaml
+name: my-ai-app
+description: Custom AI application pattern
+tier: sandbox   # sandbox | tested | maintained
+
+charts:
+  - name: my-inference
+    path: ./charts/my-inference    # local chart (copied into pattern)
+    namespace: ai-inference
+    labels:
+      opendatahub.io/dashboard: "true"
+
+  - name: my-frontend
+    repo: https://charts.example.com  # external chart (referenced by URL)
+    version: "1.2.0"
+    namespace: frontend
+
+operators:
+  - openshift-ai
+  - nvidia-gpu
+
+secrets:
+  - name: hf_token
+    onMissingValue: prompt     # user provides at deploy time
+  - name: db_password
+    onMissingValue: generate   # auto-generate with vault policy
+
+vault:
+  enabled: true
+
+options:
+  syncPolicy: Automatic           # Automatic | Manual
+  installPlanApproval: Automatic   # Automatic | Manual
+  clustergroup_version: "0.9.*"
+```
+
+Charts can mix `path:` (local, copied into pattern) and `repo:` (external, referenced by URL).
+
+See `examples/sample-spec.yaml` for a complete reference.
+
+## Interactive Questionnaire
+
+When running `quickpat create` without `--non-interactive`, the guided questionnaire covers:
+
+| Section | Description |
+|---------|-------------|
+| Pattern name | Name for the generated pattern |
+| Pattern tier | `sandbox` / `tested` / `maintained` |
+| Operators | Remove detected operators or add undetected ones |
+| Namespaces | Override auto-derived namespace assignments (multi-chart only) |
+| Secrets | Classify each secret as `prompt` / `generate` / `skip` |
+| Chart strategy | Local (copy into pattern) or External (reference by URL) |
+| Vault | Enable/disable HashiCorp Vault |
+| Global options | Sync policy, install plan approval |
+| Output directory | Where to write the pattern |
 
 ## Generated Pattern Structure
 
@@ -106,29 +240,29 @@ my-pattern/
 ├── values-global.yaml              # Global config, multisource settings
 ├── values-hub.yaml                 # Hub cluster: namespaces, operators, apps
 ├── values-secret.yaml.template     # Vault secrets template (v2.0 format)
-├── Makefile                        # Includes Makefile-common
-├── Makefile-common                 # Standard VP make targets (install, show, etc.)
-├── pattern.sh                      # Utility container runner
-├── pattern-metadata.yaml           # Pattern registry metadata
-├── ansible.cfg                     # Ansible configuration
+├── Makefile
+├── Makefile-common
+├── pattern.sh
+├── pattern-metadata.yaml
+├── ansible.cfg
 ├── .ansible-lint
 ├── .gitignore
 ├── charts/
 │   └── all/
-│       └── <app-name>/             # Local copy of the Helm chart
+│       └── <app-name>/             # Local copy of the Helm chart(s)
 ├── overrides/
-│   ├── values-AWS.yaml             # Platform-specific overrides
+│   ├── values-AWS.yaml
 │   ├── values-Azure.yaml
 │   ├── values-GCP.yaml
 │   ├── values-IBMCloud.yaml
 │   └── values-None.yaml
 └── docs/
-    └── quickstart-analysis.md      # Analysis report
+    └── quickstart-analysis.md
 ```
 
 ## Supported Quickstart Layouts
 
-QuickPat auto-detects Chart.yaml in these common AI Quickstart conventions:
+QuickPat auto-detects Chart.yaml in these common conventions:
 
 | Layout | Examples |
 |--------|----------|
@@ -138,9 +272,9 @@ QuickPat auto-detects Chart.yaml in these common AI Quickstart conventions:
 | `chart/` | lemonade-stand-assistant |
 | Root directory | Any chart at repo root |
 
-## Detected Operators
+Multi-chart quickstarts are fully supported — charts sharing a subdirectory get a shared namespace (e.g. `observability/korrel8r` + `observability/loki` share one namespace).
 
-QuickPat scans chart templates and values for indicators of required OpenShift operators:
+## Detected Operators
 
 | Operator | Detected Via |
 |----------|-------------|
@@ -152,112 +286,89 @@ QuickPat scans chart templates and values for indicators of required OpenShift o
 | OpenShift Serverless | `knativeserving`, `knative` (auto-added with OpenShift AI) |
 | AMQ Streams (Kafka) | `kafka`, `kafkatopic` |
 
-Co-dependencies are resolved transitively — enabling GPU automatically adds NFD, enabling OpenShift AI automatically adds Service Mesh and Serverless.
+Co-dependencies are resolved transitively — enabling GPU automatically adds NFD, enabling OpenShift AI adds Service Mesh and Serverless.
 
-## Model-Agnostic Skills
+## LLM Providers
 
-The `skills/` directory provides the same transformation logic as reusable, model-agnostic skills that work with any LLM or in pure deterministic mode.
+QuickPat optionally uses LLMs for enhanced operator detection, secret review, and validation. Pass `--llm <provider>` to `create`, `batch`, or `validate`.
 
-### Sub-Skills
+| Provider | Flag | Config Required |
+|----------|------|-----------------|
+| OpenAI | `--llm openai` | `OPENAI_API_KEY` env var |
+| Anthropic | `--llm anthropic` | `ANTHROPIC_API_KEY` env var |
+| Ollama | `--llm ollama` | Local at `localhost:11434` (no key) |
+| vLLM | `--llm vllm` | `--llm-url` for custom endpoint |
+| DeepInfra | `--llm deepinfra` | `DEEPINFRA_API_KEY` env var |
 
-| Skill | Description |
-|-------|-------------|
-| `analyze` | Parse quickstart Helm chart |
-| `detect` | Identify operators and review secrets (optional LLM) |
-| `transform` | Generate pattern files |
-| `validate` | Check correctness and auto-fix |
+Override the model with `--model <name>` and the endpoint with `--llm-url <url>`.
 
-### Deterministic (No LLM)
+All LLM features are optional — QuickPat works fully in deterministic mode without any LLM.
 
-```bash
-# Full pipeline
-python skills/transform_quickstart.py transform /path/to/quickstart
+## Configuration
 
-# Individual sub-skills
-python skills/transform_quickstart.py analyze /path/to/quickstart
-python skills/transform_quickstart.py detect /path/to/quickstart
-python skills/transform_quickstart.py validate /path/to/pattern
+QuickPat loads settings from `quickpat.yaml` (project root) or `~/.config/quickpat/config.yaml`. Environment variables override config file values.
+
+```yaml
+llm:
+  provider: none
+  openai:
+    model: gpt-4o-mini
+  anthropic:
+    model: claude-sonnet-4-20250514
+  ollama:
+    model: llama3.1
+    base_url: http://localhost:11434
+
+pattern:
+  output_dir: ~/patterns
+  chart_strategy: local
+  clustergroup_version: "0.9.*"
+
+registry:
+  quickstart_url: https://raw.githubusercontent.com/rh-ai-quickstart/ai-quickstart-pub/main/.gitmodules
+  chart_repo_index_url: https://rh-ai-quickstart.github.io/ai-architecture-charts/index.yaml
+
+platforms:
+  - AWS
+  - Azure
+  - GCP
+  - IBMCloud
+  - None
 ```
 
-### With LLM Enhancement
+See `quickpat.yaml.sample` for a complete reference.
 
-When an LLM is provided, it enhances operator detection for unusual charts and reviews secrets for false positives. A self-correcting validation loop catches and repairs issues iteratively.
-
-```bash
-# With OpenAI
-python skills/transform_quickstart.py transform /path/to/quickstart --llm openai
-
-# With Anthropic
-python skills/transform_quickstart.py transform /path/to/quickstart --llm anthropic
-
-# With local Ollama
-python skills/transform_quickstart.py transform /path/to/quickstart --llm ollama --model mistral
-```
-
-### Python API
-
-```python
-from skills.transform_quickstart import transform
-
-# Deterministic
-result = transform("/path/to/quickstart")
-
-# With any LLM — just pass a callable(system: str, user: str) -> str
-from skills.transform_quickstart import make_ollama_llm
-result = transform("/path/to/quickstart", llm=make_ollama_llm())
-```
-
-Built-in LLM adapters: `make_openai_llm()`, `make_anthropic_llm()`, `make_ollama_llm()`. Any `callable(system_prompt, user_message) -> str` works.
-
-### Text Skill
+## Text Skill
 
 Copy `skills/transform_quickstart.md` into any LLM's system prompt (ChatGPT, Claude, Gemini, local models) for interactive guided transformation.
-
-### Self-Correcting Validation
-
-The `validate --fix` command runs a loop that detects and auto-repairs common issues:
-
-```bash
-python skills/transform_quickstart.py validate /path/to/pattern --fix
-```
-
-Auto-fixable issues include:
-- `main:` incorrectly nested under `global:` in values-global.yaml
-- `multiSourceConfig.enabled` not set to `true`
-- Missing `clusterGroupChartVersion`
-- Deprecated `vaultPrefixOverride` (converted to `vaultPrefixes`)
-- Missing or wrong `version: "2.0"` in values-secret.yaml.template
-- Legacy `include common/Makefile` (fixed to `include Makefile-common`)
-- `pattern.sh` missing executable bit
-- Missing `overrides/` directory or platform files
-- Wrong chart paths (`charts/hub/` corrected to `charts/all/`)
-- Infrastructure apps using `path:` instead of `chart:` + `chartVersion:`
-- Missing `sharedValueFiles` in values-hub.yaml
-
-## Environment Variables
-
-| Variable | Purpose |
-|----------|---------|
-| `OPENAI_API_KEY` | Required for `--llm openai` |
-| `ANTHROPIC_API_KEY` | Required for `--llm anthropic` |
-| Ollama | No API key needed (local at `localhost:11434`) |
 
 ## Project Structure
 
 ```
 quickpat/
 ├── quickpat/
-│   ├── cli.py          # CLI entry point (analyze, create)
+│   ├── cli.py          # CLI entry point (7 subcommands)
 │   ├── analyzer.py     # Helm chart parser, operator/secret/feature detection
 │   ├── generator.py    # Pattern file generator + markdown report
-│   └── operators.py    # Operator registry with detection indicators
+│   ├── validator.py    # Pattern validation + auto-fix loop
+│   ├── pipeline.py     # Orchestration: analyze -> detect -> generate -> validate
+│   ├── spec.py         # Spec YAML loader for `quickpat new`
+│   ├── readiness.py    # Publication readiness checks
+│   ├── operators.py    # Operator registry with detection indicators
+│   ├── registry.py     # ai-quickstart-pub registry + shared chart index
+│   ├── llm.py          # LLM adapter factory (5 providers)
+│   └── config.py       # Config loader (file + env vars)
 ├── skills/
-│   ├── transform_quickstart.py   # Chainable sub-skills + LLM adapters
-│   ├── transform_quickstart.md   # Text skill for any LLM
-│   ├── skill_validate.py         # Validation checks + auto-fix loop
-│   └── README.md                 # Skills usage guide
+│   └── transform_quickstart.md   # Text skill for any LLM
+├── tests/              # 168 tests across 8 files
+├── examples/
+│   └── sample-spec.yaml
+├── docs/
+│   ├── plan.md
+│   ├── pub-integration-plan.md
+│   └── shared-charts-analysis.md
 ├── pyproject.toml
-├── quickpat.sh                   # Wrapper: uv run quickpat
+├── quickpat.sh         # Wrapper: uv run quickpat
 └── uv.lock
 ```
 

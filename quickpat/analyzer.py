@@ -67,8 +67,9 @@ class ChartInfo:
     dependencies: list = field(default_factory=list)
     values: dict = field(default_factory=dict)
     needs_oai_labels: bool = False
-    strategy: str = ""  # 'local' or 'external'; empty = use config default
+    strategy: str = ""  # 'local', 'external', or 'remote'; empty = use config default
     repo_url: str = ""  # Helm repo URL for external charts
+    sub_chart_info: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -83,6 +84,8 @@ class QuickstartAnalysis:
     detected_operators: list = field(default_factory=list)
     detected_secrets: list = field(default_factory=list)
     values: dict = field(default_factory=dict)
+    git_repo_url: str = ""
+    chart_path_in_repo: str = ""
     has_gpu_requirement: bool = False
     has_pipeline: bool = False
     has_llm_service: bool = False
@@ -324,3 +327,41 @@ class QuickstartAnalyzer:
                 except Exception:
                     pass
         return '\n'.join(texts)
+
+    def detect_git_origin(self) -> tuple:
+        """Detect the git remote URL and chart path within the repo.
+
+        Returns (repo_url, chart_path_in_repo) or ('', '').
+        """
+        import subprocess
+
+        # Find the git root
+        git_dir = self.path
+        while git_dir != git_dir.parent:
+            if (git_dir / '.git').exists():
+                break
+            git_dir = git_dir.parent
+        else:
+            return ('', '')
+
+        try:
+            result = subprocess.run(
+                ['git', 'remote', 'get-url', 'origin'],
+                cwd=str(git_dir),
+                capture_output=True, text=True, timeout=5,
+            )
+            repo_url = result.stdout.strip() if result.returncode == 0 else ''
+        except Exception:
+            repo_url = ''
+
+        if not repo_url:
+            return ('', '')
+
+        # Compute chart path relative to git root
+        try:
+            chart_rel = self.path.relative_to(git_dir)
+            chart_path_in_repo = str(chart_rel) if str(chart_rel) != '.' else ''
+        except ValueError:
+            chart_path_in_repo = ''
+
+        return (repo_url, chart_path_in_repo)

@@ -36,12 +36,22 @@ class PatternGenerator:
         self._generate_report()
 
         # Copy charts with local strategy (per-chart or global default)
+        default_strategy = self.config.get('chart_strategy', 'local')
         has_local = any(
-            (ci.strategy or self.config.get('chart_strategy', 'local')) == 'local'
+            (ci.strategy or default_strategy) == 'local'
             for ci in self.analysis.charts
         )
         if has_local:
             self._copy_chart_locally()
+
+        # Remote strategy: pattern-secrets chart + override file
+        has_remote = any(
+            (ci.strategy or default_strategy) == 'remote'
+            for ci in self.analysis.charts
+        )
+        if has_remote and self.config.get('use_vault'):
+            self._generate_pattern_secrets_chart()
+            self._generate_app_override_file()
 
     # ── values-global.yaml ──────────────────────────────────────────
 
@@ -204,6 +214,7 @@ class PatternGenerator:
 
         # Application chart(s)
         default_strategy = self.config.get('chart_strategy', 'local')
+        has_remote = False
         for name, ns, ci in self._get_app_charts():
             strategy = ci.strategy or default_strategy
             if strategy == 'local':
@@ -213,6 +224,25 @@ class PatternGenerator:
                     'project': 'hub',
                     'path': f'charts/all/{name}',
                 }
+            elif strategy == 'remote':
+                has_remote = True
+                git_url = self.config.get('git_repo_url', '')
+                chart_path = self.config.get('chart_path_in_repo', '')
+                app_entry = {
+                    'name': name,
+                    'namespace': ns,
+                    'project': 'hub',
+                    'repoURL': git_url,
+                    'path': chart_path,
+                    'chartVersion': self.config.get('chart_branch', 'main'),
+                }
+                extra_files = self.config.get('extra_value_files')
+                if extra_files:
+                    app_entry['extraValueFiles'] = extra_files
+                ignore_diffs = self.config.get('ignore_differences')
+                if ignore_diffs:
+                    app_entry['ignoreDifferences'] = ignore_diffs
+                applications[name] = app_entry
             else:
                 repo_url = ci.repo_url or self.config.get('chart_repo_url', '')
                 applications[name] = {
@@ -226,6 +256,16 @@ class PatternGenerator:
                     ),
                 }
 
+        # Pattern-secrets chart for remote strategy with vault
+        if has_remote and use_vault:
+            app_namespace = self.config.get('app_namespace', self.analysis.name)
+            applications['pattern-secrets'] = {
+                'name': 'pattern-secrets',
+                'namespace': app_namespace,
+                'project': 'hub',
+                'path': 'charts/pattern-secrets',
+            }
+
         return applications
 
     # ── values-secret.yaml.template ─────────────────────────────────
@@ -234,24 +274,77 @@ class PatternGenerator:
         if not self.config.get('use_vault'):
             return
 
+        # Remote strategy: grouped secrets by service name
+        default_strategy = self.config.get('chart_strategy', 'local')
+        has_remote = any(
+            (ci.strategy or default_strategy) == 'remote'
+            for ci in self.analysis.charts
+        )
+        if has_remote and self.config.get('secret_groups'):
+            self._generate_grouped_secret_template()
+            return
+
+        # Local/external strategy: flat secret list
+        self._generate_flat_secret_template()
+
+    def _generate_grouped_secret_template(self):
+        """Generate values-secret.yaml.template with per-service grouping."""
+        vault_prefix = self.config.get('vault_prefix', 'hub')
+        secret_groups = self.config.get('secret_groups', {})
+
+        secrets = []
+        for group_name, fields in secret_groups.items():
+            group_fields = []
+            for f in fields:
+                if f.get('computed'):
+                    continue
+                entry = {'name': f['name']}
+                classification = f.get('classification', 'prompt')
+                if classification == 'static-config':
+                    entry['value'] = f.get('default_value', '')
+                elif classification == 'auto-generate':
+                    entry['onMissingValue'] = 'generate'
+                    entry['vaultPolicy'] = 'validatedPatternDefaultPolicy'
+                else:
+                    entry['onMissingValue'] = 'prompt'
+                group_fields.append(entry)
+
+            if group_fields:
+                secrets.append({
+                    'name': group_name,
+                    'vaultPrefixes': [vault_prefix],
+                    'fields': group_fields,
+                })
+
+        if not secrets:
+            secrets.append({
+                'name': f"{self.config['pattern_name']}-secrets",
+                'vaultPrefixes': [vault_prefix],
+                'fields': [{'name': 'secret', 'onMissingValue': 'generate',
+                            'vaultPolicy': 'validatedPatternDefaultPolicy'}],
+            })
+
+        self._write_yaml(
+            self.output_dir / 'values-secret.yaml.template',
+            {'version': '2.0', 'secrets': secrets},
+        )
+
+    def _generate_flat_secret_template(self):
+        """Generate values-secret.yaml.template with flat field list."""
         secret_config = self.config.get('secret_config', {})
         fields = []
         seen_names = {}  # name -> count
         for secret in self.analysis.detected_secrets:
-            # Check if this secret should be skipped
             action = secret_config.get(secret.name, 'prompt')
             if action == 'skip':
                 continue
 
             name = secret.name
             if name in seen_names:
-                # Disambiguate using the path: rag.pgvector.secret.password -> pgvector_password
                 parts = [p for p in secret.path.replace('[', '.').replace(']', '').split('.')
                          if p and p != name]
-                # Use the last meaningful path segment + name
                 if parts:
                     name = f"{parts[-1]}_{name}"
-                # If still a dupe, add a counter
                 if name in seen_names:
                     seen_names[name] += 1
                     name = f"{name}_{seen_names[name]}"
@@ -263,7 +356,6 @@ class PatternGenerator:
             fields.append(field_entry)
 
         if not fields:
-            # Generate a placeholder secret
             fields.append({
                 'name': 'secret',
                 'onMissingValue': 'generate',
@@ -542,6 +634,97 @@ podman run -it --rm --pull=newer \
                 path.write_text(
                     f'# Platform-specific overrides for {platform}\n'
                 )
+
+    # ── remote strategy: pattern-secrets chart ────────────────────
+
+    def _generate_pattern_secrets_chart(self):
+        """Generate charts/pattern-secrets/ with ExternalSecret CRDs."""
+        chart_dir = self.output_dir / 'charts' / 'pattern-secrets'
+        chart_dir.mkdir(parents=True, exist_ok=True)
+        tmpl_dir = chart_dir / 'templates'
+        tmpl_dir.mkdir(exist_ok=True)
+
+        pattern_name = self.config['pattern_name']
+        self._write_yaml(chart_dir / 'Chart.yaml', {
+            'apiVersion': 'v2',
+            'name': 'pattern-secrets',
+            'version': '0.1.0',
+            'description': f'ExternalSecret CRDs for {pattern_name}',
+            'type': 'application',
+        })
+
+        # Empty values.yaml
+        (chart_dir / 'values.yaml').write_text('')
+
+        secret_groups = self.config.get('secret_groups', {})
+        vault_prefix = self.config.get('vault_prefix', 'hub')
+        secret_target_names = self.config.get('secret_target_names', {})
+
+        for group_name, fields in secret_groups.items():
+            target_name = secret_target_names.get(group_name, group_name)
+
+            # Build per-key data entries and target template data
+            data_entries = []
+            template_data = {}
+            for f in fields:
+                fname = f['name']
+                data_entries.append({
+                    'secretKey': fname,
+                    'remoteRef': {
+                        'key': f'secret/data/{vault_prefix}/{group_name}',
+                        'property': fname,
+                    },
+                })
+                if f.get('computed'):
+                    template_data[fname] = f['template']
+                else:
+                    template_data[fname] = '{{ .' + fname + ' }}'
+
+            ext_secret = {
+                'apiVersion': 'external-secrets.io/v1',
+                'kind': 'ExternalSecret',
+                'metadata': {'name': target_name},
+                'spec': {
+                    'refreshInterval': '15s',
+                    'secretStoreRef': {
+                        'name': 'vault-backend',
+                        'kind': 'ClusterSecretStore',
+                    },
+                    'target': {
+                        'name': target_name,
+                        'template': {
+                            'type': 'Opaque',
+                            'engineVersion': 'v2',
+                            'data': template_data,
+                        },
+                    },
+                    'data': data_entries,
+                },
+            }
+
+            filename = f'{group_name}-secret.yaml'
+            self._write_yaml(tmpl_dir / filename, ext_secret)
+
+    def _generate_app_override_file(self):
+        """Generate overrides/<app-name>.yaml disabling in-chart secret creation."""
+        override_entries = self.config.get('override_entries', [])
+        if not override_entries:
+            return
+
+        overrides_dir = self.output_dir / 'overrides'
+        overrides_dir.mkdir(exist_ok=True)
+
+        # Build nested dict from dotted paths
+        override_data = {}
+        for entry in override_entries:
+            parts = entry['path'].split('.')
+            d = override_data
+            for part in parts[:-1]:
+                d = d.setdefault(part, {})
+            d[parts[-1]] = entry['value']
+
+        app_name = self.config.get('app_name', self.analysis.name)
+        self._write_yaml(overrides_dir / f'{app_name}.yaml', override_data)
 
     # ── charts ──────────────────────────────────────────────────────
 

@@ -51,8 +51,8 @@ def validate_spec(spec: dict) -> list:
                     continue
                 if 'name' not in chart:
                     errors.append(f"charts[{i}]: missing 'name'")
-                if 'path' not in chart and 'repo' not in chart:
-                    errors.append(f"charts[{i}]: must have 'path' (local) or 'repo' (external)")
+                if 'path' not in chart and 'repo' not in chart and 'git_repo' not in chart:
+                    errors.append(f"charts[{i}]: must have 'path' (local), 'repo' (external), or 'git_repo' (remote)")
 
     if 'operators' in spec:
         if not isinstance(spec['operators'], list):
@@ -113,6 +113,9 @@ def build_from_spec(spec: dict, spec_path: str = "") -> tuple:
         elif 'repo' in entry:
             ci.strategy = 'external'
             ci.repo_url = entry['repo']
+            ci.version = entry.get('version', '0.1.0')
+        elif 'git_repo' in entry:
+            ci.strategy = 'remote'
             ci.version = entry.get('version', '0.1.0')
 
         ci.group = entry.get('namespace', '')
@@ -175,6 +178,15 @@ def build_from_spec(spec: dict, spec_path: str = "") -> tuple:
         'tier': spec.get('tier', 'sandbox'),
         'clustergroup_version': opts.get('clustergroup_version', '0.9.*'),
     }
+
+    # Remote strategy config from git_repo chart entries
+    for entry in spec.get('charts', []):
+        if 'git_repo' in entry:
+            config['git_repo_url'] = entry['git_repo']
+            config['chart_path_in_repo'] = entry.get('path_in_repo', '')
+            config['chart_branch'] = entry.get('branch', 'main')
+            config['vault_prefix'] = vault_cfg.get('prefix', 'hub')
+            break
 
     if secret_config:
         config['secret_config'] = secret_config

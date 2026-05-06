@@ -312,3 +312,226 @@ class TestVaultDisabled:
         apps = data["clusterGroup"]["applications"]
         assert "vault" not in apps
         assert "golang-external-secrets" not in apps
+
+
+def _remote_config(tmp_path, **overrides):
+    """Build a config dict for remote strategy generation."""
+    from quickpat.analyzer import QuickstartAnalysis, ChartInfo
+    analysis = QuickstartAnalysis(
+        name="rag-quickstart", version="1.0.0",
+        description="RAG quickstart",
+        charts=[ChartInfo(name="rag-quickstart", strategy="remote")],
+    )
+    out = str(tmp_path / "output")
+    config = {
+        "pattern_name": "rag-pattern",
+        "app_name": "rag-quickstart",
+        "app_namespace": "rag",
+        "operators": [],
+        "chart_strategy": "remote",
+        "use_vault": True,
+        "output_dir": out,
+        "clustergroup_version": "0.9.*",
+        "git_repo_url": "https://github.com/rh-ai-quickstart/RAG",
+        "chart_path_in_repo": "deploy/helm/rag",
+        "chart_branch": "main",
+        "vault_prefix": "hub",
+        "secret_target_names": {
+            "pgvector": "pgvector",
+            "llm-service": "huggingface-secret",
+        },
+        "secret_groups": {
+            "pgvector": [
+                {"name": "user", "classification": "static-config", "default_value": "postgres"},
+                {"name": "password", "classification": "auto-generate"},
+                {"name": "host", "classification": "static-config", "default_value": "pgvector"},
+                {"name": "port", "classification": "static-config", "default_value": "5432"},
+                {"name": "dbname", "classification": "static-config", "default_value": "rag_blueprint"},
+                {"name": "jdbc-uri", "computed": True,
+                 "template": "jdbc:postgresql://{{ .host }}:{{ .port }}/{{ .dbname }}"},
+            ],
+            "llm-service": [
+                {"name": "hf_token", "classification": "vault-secret"},
+            ],
+        },
+        "override_entries": [
+            {"path": "pgvector.secret.create", "value": False},
+            {"path": "llm-service.secret.enabled", "value": False},
+        ],
+        "extra_value_files": [
+            '/overrides/rag-quickstart.yaml',
+        ],
+        "ignore_differences": [
+            {"group": "route.openshift.io", "kind": "Route",
+             "jsonPointers": ["/spec/host", "/spec/alternateBackends"]},
+        ],
+    }
+    config.update(overrides)
+    gen = PatternGenerator(analysis, config)
+    gen.generate()
+    return out, analysis, config
+
+
+class TestRemoteStrategyGeneration:
+    def test_app_has_repo_url_and_path(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "values-hub.yaml") as f:
+            data = yaml.safe_load(f)
+        app = data["clusterGroup"]["applications"]["rag-quickstart"]
+        assert app["repoURL"] == "https://github.com/rh-ai-quickstart/RAG"
+        assert app["path"] == "deploy/helm/rag"
+        assert app["chartVersion"] == "main"
+        assert "chart" not in app
+
+    def test_app_has_extra_value_files(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "values-hub.yaml") as f:
+            data = yaml.safe_load(f)
+        app = data["clusterGroup"]["applications"]["rag-quickstart"]
+        assert app["extraValueFiles"] == ["/overrides/rag-quickstart.yaml"]
+
+    def test_app_has_ignore_differences(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "values-hub.yaml") as f:
+            data = yaml.safe_load(f)
+        app = data["clusterGroup"]["applications"]["rag-quickstart"]
+        assert len(app["ignoreDifferences"]) == 1
+        assert app["ignoreDifferences"][0]["kind"] == "Route"
+
+    def test_pattern_secrets_app_created(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "values-hub.yaml") as f:
+            data = yaml.safe_load(f)
+        apps = data["clusterGroup"]["applications"]
+        assert "pattern-secrets" in apps
+        assert apps["pattern-secrets"]["path"] == "charts/pattern-secrets"
+        assert apps["pattern-secrets"]["namespace"] == "rag"
+
+    def test_pattern_secrets_chart_exists(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path)
+        from pathlib import Path
+        chart_dir = Path(out) / "charts" / "pattern-secrets"
+        assert (chart_dir / "Chart.yaml").exists()
+        with open(chart_dir / "Chart.yaml") as f:
+            data = yaml.safe_load(f)
+        assert data["name"] == "pattern-secrets"
+
+    def test_external_secret_crds_created(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path)
+        from pathlib import Path
+        tmpl_dir = Path(out) / "charts" / "pattern-secrets" / "templates"
+        assert (tmpl_dir / "pgvector-secret.yaml").exists()
+        assert (tmpl_dir / "llm-service-secret.yaml").exists()
+
+    def test_external_secret_uses_v1(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "charts" / "pattern-secrets" / "templates" / "pgvector-secret.yaml") as f:
+            data = yaml.safe_load(f)
+        assert data["apiVersion"] == "external-secrets.io/v1"
+        assert data["kind"] == "ExternalSecret"
+
+    def test_external_secret_target_name_matches_subchart(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "charts" / "pattern-secrets" / "templates" / "pgvector-secret.yaml") as f:
+            data = yaml.safe_load(f)
+        assert data["metadata"]["name"] == "pgvector"
+        assert data["spec"]["target"]["name"] == "pgvector"
+
+        with open(Path(out) / "charts" / "pattern-secrets" / "templates" / "llm-service-secret.yaml") as f:
+            data = yaml.safe_load(f)
+        assert data["metadata"]["name"] == "huggingface-secret"
+        assert data["spec"]["target"]["name"] == "huggingface-secret"
+
+    def test_external_secret_per_key_data(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "charts" / "pattern-secrets" / "templates" / "pgvector-secret.yaml") as f:
+            data = yaml.safe_load(f)
+        spec_data = data["spec"]["data"]
+        keys = [d["secretKey"] for d in spec_data]
+        assert "user" in keys
+        assert "password" in keys
+        assert "host" in keys
+        for d in spec_data:
+            assert d["remoteRef"]["key"] == "secret/data/hub/pgvector"
+
+    def test_external_secret_computed_field_in_template(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "charts" / "pattern-secrets" / "templates" / "pgvector-secret.yaml") as f:
+            data = yaml.safe_load(f)
+        tmpl_data = data["spec"]["target"]["template"]["data"]
+        assert "jdbc-uri" in tmpl_data
+        assert "postgresql://" in tmpl_data["jdbc-uri"]
+        # Non-computed fields use simple template reference
+        assert tmpl_data["user"] == "{{ .user }}"
+
+    def test_override_file_created(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path)
+        from pathlib import Path
+        override_path = Path(out) / "overrides" / "rag-quickstart.yaml"
+        assert override_path.exists()
+        with open(override_path) as f:
+            data = yaml.safe_load(f)
+        assert data["pgvector"]["secret"]["create"] is False
+        assert data["llm-service"]["secret"]["enabled"] is False
+
+    def test_grouped_secret_template(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "values-secret.yaml.template") as f:
+            data = yaml.safe_load(f)
+        assert data["version"] == "2.0"
+        secrets = data["secrets"]
+        names = [s["name"] for s in secrets]
+        assert "pgvector" in names
+        assert "llm-service" in names
+
+    def test_grouped_secret_vault_prefix_hub(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "values-secret.yaml.template") as f:
+            data = yaml.safe_load(f)
+        for s in data["secrets"]:
+            assert s["vaultPrefixes"] == ["hub"]
+
+    def test_grouped_secret_classifications(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "values-secret.yaml.template") as f:
+            data = yaml.safe_load(f)
+        pg = next(s for s in data["secrets"] if s["name"] == "pgvector")
+        field_map = {f["name"]: f for f in pg["fields"]}
+        assert field_map["user"]["value"] == "postgres"
+        assert field_map["password"]["onMissingValue"] == "generate"
+        assert "vaultPolicy" in field_map["password"]
+        # Computed fields excluded from values-secret
+        assert "jdbc-uri" not in field_map
+
+    def test_grouped_secret_prompt_classification(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "values-secret.yaml.template") as f:
+            data = yaml.safe_load(f)
+        llm = next(s for s in data["secrets"] if s["name"] == "llm-service")
+        assert llm["fields"][0]["name"] == "hf_token"
+        assert llm["fields"][0]["onMissingValue"] == "prompt"
+
+    def test_no_local_chart_copy_for_remote(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path)
+        from pathlib import Path
+        assert not (Path(out) / "charts" / "all").exists()
+
+    def test_no_pattern_secrets_without_vault(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path, use_vault=False)
+        from pathlib import Path
+        with open(Path(out) / "values-hub.yaml") as f:
+            data = yaml.safe_load(f)
+        assert "pattern-secrets" not in data["clusterGroup"]["applications"]
+        assert not (Path(out) / "charts" / "pattern-secrets").exists()
