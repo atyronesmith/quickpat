@@ -356,11 +356,14 @@ quickpat/
 │   ├── readiness.py    # Publication readiness checks
 │   ├── operators.py    # Operator registry with detection indicators
 │   ├── registry.py     # ai-quickstart-pub registry + shared chart index
-│   ├── llm.py          # LLM adapter factory (5 providers)
-│   └── config.py       # Config loader (file + env vars)
+│   ├── providers/      # LLM provider classes (5 providers)
+│   ├── profile.py      # Deployment profile presets
+│   ├── subchart.py     # Sub-chart dependency inspector
+│   ├── transformer.py  # Chart-to-pattern transformer
+│   └── config.py       # Config loader (YAML + defaults)
 ├── skills/
 │   └── transform_quickstart.md   # Text skill for any LLM
-├── tests/              # 168 tests across 8 files
+├── tests/              # 276 tests
 ├── examples/
 │   └── sample-spec.yaml
 ├── docs/
