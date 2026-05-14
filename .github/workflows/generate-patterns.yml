@@ -126,10 +126,6 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
       - name: Download generated pattern
         uses: actions/download-artifact@v4
         with:
@@ -140,15 +136,16 @@ jobs:
         run: |
           BRANCH="generated/${{ matrix.quickstart }}"
           PATTERN_DIR="/tmp/${{ matrix.quickstart }}-pattern"
+          REPO_URL="https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
 
+          # Build a standalone repo with no relation to main
+          mkdir /tmp/publish && cd /tmp/publish
+          git init
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Create orphan branch with just the pattern files
-          git checkout --orphan "$BRANCH"
-          git rm -rf . > /dev/null 2>&1 || true
           cp -r "$PATTERN_DIR"/. .
           git add -A
           git commit -m "Generated pattern from ${{ matrix.quickstart }} ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
-          git push --force origin "$BRANCH"
+          git branch -M "$BRANCH"
+          git push --force "$REPO_URL" "$BRANCH"
           echo "Published: $BRANCH"
