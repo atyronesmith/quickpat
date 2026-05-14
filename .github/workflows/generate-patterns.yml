@@ -1,0 +1,154 @@
+name: Generate and Validate Patterns
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  generate-and-validate:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        quickstart:
+          - RAG
+          - maas-code-assistant
+          - product-recommender
+          - lemonade-stand
+          - llm-cpu-serving
+          - data-governance
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install QuickPat
+        run: pip install .
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Generate pattern
+        run: |
+          quickpat create "${{ matrix.quickstart }}" \
+            --non-interactive \
+            --output "/tmp/${{ matrix.quickstart }}-pattern"
+
+      - name: Validate pattern
+        run: quickpat validate "/tmp/${{ matrix.quickstart }}-pattern"
+
+      - name: Helm template (pattern-secrets)
+        run: |
+          SECRETS_CHART="/tmp/${{ matrix.quickstart }}-pattern/charts/pattern-secrets"
+          if [ -d "$SECRETS_CHART" ]; then
+            helm template test "$SECRETS_CHART" \
+              --set global.pattern="test" \
+              --set global.namespace="default" 2>&1
+            echo "pattern-secrets chart renders OK"
+          else
+            echo "No pattern-secrets chart (local strategy) — skipping"
+          fi
+
+      - name: Helm template (upstream chart)
+        run: |
+          PATTERN_DIR="/tmp/${{ matrix.quickstart }}-pattern"
+          VALUES_HUB="$PATTERN_DIR/values-hub.yaml"
+
+          # Extract repoURL and path from values-hub.yaml for the main app
+          REPO_URL=$(python3 -c "
+          import yaml
+          with open('$VALUES_HUB') as f:
+              data = yaml.safe_load(f)
+          apps = data.get('clusterGroup', {}).get('applications', {})
+          for name, app in apps.items():
+              if name in ('vault', 'golang-external-secrets', 'pattern-secrets'):
+                  continue
+              url = app.get('repoURL', '')
+              if url:
+                  print(url)
+                  break
+          " 2>/dev/null || true)
+
+          CHART_PATH=$(python3 -c "
+          import yaml
+          with open('$VALUES_HUB') as f:
+              data = yaml.safe_load(f)
+          apps = data.get('clusterGroup', {}).get('applications', {})
+          for name, app in apps.items():
+              if name in ('vault', 'golang-external-secrets', 'pattern-secrets'):
+                  continue
+              path = app.get('path', '.')
+              if path:
+                  print(path)
+                  break
+          " 2>/dev/null || true)
+
+          if [ -n "$REPO_URL" ] && [ -n "$CHART_PATH" ]; then
+            echo "Cloning upstream: $REPO_URL (path: $CHART_PATH)"
+            git clone --depth 1 "$REPO_URL" /tmp/upstream-qs 2>&1 || true
+            if [ -d "/tmp/upstream-qs/$CHART_PATH" ]; then
+              helm template test "/tmp/upstream-qs/$CHART_PATH" 2>&1 || echo "WARN: upstream chart template failed (may need values)"
+            else
+              echo "WARN: chart path $CHART_PATH not found in upstream repo"
+            fi
+            rm -rf /tmp/upstream-qs
+          else
+            echo "No remote chart URL found — skipping upstream render"
+          fi
+
+      - name: Upload generated pattern
+        uses: actions/upload-artifact@v4
+        with:
+          name: "${{ matrix.quickstart }}-pattern"
+          path: "/tmp/${{ matrix.quickstart }}-pattern"
+          retention-days: 7
+
+  publish-branches:
+    needs: generate-and-validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        quickstart:
+          - RAG
+          - maas-code-assistant
+          - product-recommender
+          - lemonade-stand
+          - llm-cpu-serving
+          - data-governance
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download generated pattern
+        uses: actions/download-artifact@v4
+        with:
+          name: "${{ matrix.quickstart }}-pattern"
+          path: "/tmp/${{ matrix.quickstart }}-pattern"
+
+      - name: Publish to generated branch
+        run: |
+          BRANCH="generated/${{ matrix.quickstart }}"
+          PATTERN_DIR="/tmp/${{ matrix.quickstart }}-pattern"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Create orphan branch with just the pattern files
+          git checkout --orphan "$BRANCH"
+          git rm -rf . > /dev/null 2>&1 || true
+          cp -r "$PATTERN_DIR"/. .
+          git add -A
+          git commit -m "Generated pattern from ${{ matrix.quickstart }} ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+          git push --force origin "$BRANCH"
+          echo "Published: $BRANCH"
