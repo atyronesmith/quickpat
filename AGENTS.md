@@ -33,6 +33,15 @@ pytest tests/eval/        # eval matrix: quickstarts x providers
 - Eval tests clone real quickstart repos and optionally call live LLM APIs.
 - Test fixtures for chart layouts: `single_chart_quickstart`, `multi_chart_quickstart`, `grouped_chart_quickstart`, `numbered_group_quickstart`, `gpu_chart_quickstart`.
 
+## CI / Generated Branches
+
+`.github/workflows/generate-patterns.yml` runs on every push to `main`:
+- Matrix of 6 quickstarts (RAG, maas-code-assistant, product-recommender, lemonade-stand, llm-cpu-serving, data-governance)
+- Each: `quickpat create --non-interactive` → `quickpat validate` → `helm template`
+- On main push: publishes to `generated/<name>` branches (orphan, force-pushed)
+- Generated branches are self-contained patterns with `scripts/` (deploy, undeploy, validate, status)
+- These branches are derived output — never edit them directly
+
 ## Security
 
 - API keys via environment variables only (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPINFRA_API_KEY`)
