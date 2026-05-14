@@ -138,14 +138,15 @@ jobs:
           PATTERN_DIR="/tmp/${{ matrix.quickstart }}-pattern"
           REPO_URL="https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
 
-          # Build a standalone repo with no relation to main
-          mkdir /tmp/publish && cd /tmp/publish
-          git init
+          # Branch from main HEAD so GitHub shows "1 ahead, 0 behind"
+          git clone --depth 1 "$REPO_URL" /tmp/publish
+          cd /tmp/publish
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git rm -rf .
           cp -r "$PATTERN_DIR"/. .
           git add -A
           git commit -m "Generated pattern from ${{ matrix.quickstart }} ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
-          git branch -M "$BRANCH"
-          git push --force "$REPO_URL" "$BRANCH"
+          git push --force origin "$BRANCH"
           echo "Published: $BRANCH"
