@@ -22,9 +22,9 @@ jobs:
           - data-governance
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -32,7 +32,7 @@ jobs:
         run: pip install .
 
       - name: Install Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
 
       - name: Generate pattern
         run: |
@@ -103,7 +103,7 @@ jobs:
           fi
 
       - name: Upload generated pattern
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: "${{ matrix.quickstart }}-pattern"
           path: "/tmp/${{ matrix.quickstart }}-pattern"
@@ -127,7 +127,7 @@ jobs:
 
     steps:
       - name: Download generated pattern
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: "${{ matrix.quickstart }}-pattern"
           path: "/tmp/${{ matrix.quickstart }}-pattern"
