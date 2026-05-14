@@ -617,6 +617,7 @@ def _profile_to_config(
             'name': cf.field_name,
             'computed': True,
             'template': cf.template,
+            'source_fields': cf.source_fields,
         })
 
     # Build override entries

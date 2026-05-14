@@ -368,7 +368,7 @@ class QuickstartAnalyzer:
         # Compute chart path relative to git root
         try:
             chart_rel = self.path.relative_to(git_dir)
-            chart_path_in_repo = str(chart_rel) if str(chart_rel) != '.' else ''
+            chart_path_in_repo = str(chart_rel)
         except ValueError:
             chart_path_in_repo = ''
 

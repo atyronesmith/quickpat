@@ -314,6 +314,53 @@ class TestVaultDisabled:
         assert "golang-external-secrets" not in apps
 
 
+class TestTransformComputedTemplate:
+    def test_strips_values_secret_prefix(self):
+        t = PatternGenerator._transform_computed_template(
+            '{{ printf "jdbc:postgresql://%s:%s/%s" .Values.secret.host .Values.secret.port .Values.secret.dbname }}',
+            ["host", "port", "dbname"],
+        )
+        assert ".Values." not in t
+        assert "{{ .host }}" in t
+        assert "{{ .port }}" in t
+        assert "{{ .dbname }}" in t
+
+    def test_strips_b64enc_and_quote(self):
+        t = PatternGenerator._transform_computed_template(
+            '{{ printf "%s:%s" .Values.secret.user .Values.secret.password | b64enc | quote }}',
+            ["user", "password"],
+        )
+        assert "b64enc" not in t
+        assert "quote" not in t
+        assert "{{ .user }}" in t
+
+    def test_strips_include_calls(self):
+        t = PatternGenerator._transform_computed_template(
+            '{{ printf "jdbc:postgresql://%s.%s:%s/%s" .Values.secret.host (include "pgvector.namespace" .) .Values.secret.port .Values.secret.dbname }}',
+            ["host", "port", "dbname"],
+        )
+        assert "include" not in t
+        assert "{{ .host }}" in t
+        assert "{{ .port }}" in t
+        assert "{{ .dbname }}" in t
+        # The include consumed one %s — format should still be well-formed
+        assert "%s" not in t
+
+    def test_strips_values_without_secret(self):
+        t = PatternGenerator._transform_computed_template(
+            '{{ printf "http://%s:%s" .Values.minio.host .Values.minio.port }}',
+            ["host", "port"],
+        )
+        assert ".Values." not in t
+
+    def test_passthrough_clean_template(self):
+        t = PatternGenerator._transform_computed_template(
+            'jdbc:postgresql://{{ .host }}:{{ .port }}/{{ .dbname }}',
+            ["host", "port", "dbname"],
+        )
+        assert t == 'jdbc:postgresql://{{ .host }}:{{ .port }}/{{ .dbname }}'
+
+
 def _remote_config(tmp_path, **overrides):
     """Build a config dict for remote strategy generation."""
     from quickpat.analyzer import QuickstartAnalysis, ChartInfo
@@ -535,3 +582,113 @@ class TestRemoteStrategyGeneration:
             data = yaml.safe_load(f)
         assert "pattern-secrets" not in data["clusterGroup"]["applications"]
         assert not (Path(out) / "charts" / "pattern-secrets").exists()
+
+    def test_computed_fields_not_in_spec_data(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "charts" / "pattern-secrets" / "templates" / "pgvector-secret.yaml") as f:
+            data = yaml.safe_load(f)
+        keys = [d["secretKey"] for d in data["spec"]["data"]]
+        assert "jdbc-uri" not in keys
+
+    def test_no_duplicate_data_entries(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "charts" / "pattern-secrets" / "templates" / "pgvector-secret.yaml") as f:
+            data = yaml.safe_load(f)
+        keys = [d["secretKey"] for d in data["spec"]["data"]]
+        assert len(keys) == len(set(keys))
+
+    def test_computed_template_no_helm_syntax(self, tmp_path):
+        config_overrides = {
+            "secret_groups": {
+                "pgvector": [
+                    {"name": "host", "classification": "static-config", "default_value": "pgvector"},
+                    {"name": "port", "classification": "static-config", "default_value": "5432"},
+                    {"name": "jdbc-uri", "computed": True,
+                     "template": '{{ printf "jdbc:postgresql://%s:%s/db" .Values.secret.host .Values.secret.port | b64enc | quote }}',
+                     "source_fields": ["host", "port"]},
+                ],
+            },
+        }
+        out, _, _ = _remote_config(tmp_path, **config_overrides)
+        from pathlib import Path
+        with open(Path(out) / "charts" / "pattern-secrets" / "templates" / "pgvector-secret.yaml") as f:
+            data = yaml.safe_load(f)
+        tmpl = data["spec"]["target"]["template"]["data"]["jdbc-uri"]
+        assert ".Values." not in tmpl
+        assert "b64enc" not in tmpl
+        assert "{{ .host }}" in tmpl
+        assert "{{ .port }}" in tmpl
+
+
+class TestScriptsGeneration:
+    def test_scripts_directory_created(self, single_chart_quickstart, tmp_path):
+        out, _, _ = _generate(single_chart_quickstart, tmp_path)
+        from pathlib import Path
+        assert (Path(out) / "scripts").is_dir()
+
+    def test_all_scripts_present(self, single_chart_quickstart, tmp_path):
+        out, _, _ = _generate(single_chart_quickstart, tmp_path)
+        from pathlib import Path
+        scripts = Path(out) / "scripts"
+        for name in ("crc-setup.sh", "deploy.sh", "validate-deployment.sh",
+                      "undeploy.sh", "status.sh"):
+            assert (scripts / name).exists(), f"Missing {name}"
+
+    def test_scripts_executable(self, single_chart_quickstart, tmp_path):
+        out, _, _ = _generate(single_chart_quickstart, tmp_path)
+        from pathlib import Path
+        import stat
+        for name in ("crc-setup.sh", "deploy.sh", "validate-deployment.sh",
+                      "undeploy.sh", "status.sh"):
+            p = Path(out) / "scripts" / name
+            assert p.stat().st_mode & stat.S_IXUSR, f"{name} not executable"
+
+    def test_dsc_yaml_created(self, single_chart_quickstart, tmp_path):
+        out, _, _ = _generate(single_chart_quickstart, tmp_path)
+        from pathlib import Path
+        dsc = Path(out) / "scripts" / "dsc.yaml"
+        assert dsc.exists()
+        with open(dsc) as f:
+            data = yaml.safe_load(f)
+        assert data["kind"] == "DataScienceCluster"
+
+    def test_readme_created(self, single_chart_quickstart, tmp_path):
+        out, _, _ = _generate(single_chart_quickstart, tmp_path)
+        from pathlib import Path
+        readme = Path(out) / "scripts" / "README.md"
+        assert readme.exists()
+        assert "CRC" in readme.read_text()
+
+    def test_deploy_script_uses_eo_pipefail(self, single_chart_quickstart, tmp_path):
+        out, _, _ = _generate(single_chart_quickstart, tmp_path)
+        from pathlib import Path
+        deploy = (Path(out) / "scripts" / "deploy.sh").read_text()
+        assert "set -eo pipefail" in deploy
+        assert "set -euo pipefail" not in deploy
+
+    def test_pattern_sh_uses_eo_pipefail(self, single_chart_quickstart, tmp_path):
+        out, _, _ = _generate(single_chart_quickstart, tmp_path)
+        from pathlib import Path
+        pattern_sh = (Path(out) / "pattern.sh").read_text()
+        assert "set -eo pipefail" in pattern_sh
+
+
+class TestRemotePathFallback:
+    def test_empty_path_becomes_dot(self, tmp_path):
+        """Remote strategy with empty chart_path_in_repo should use '.' not ''."""
+        out, _, _ = _remote_config(tmp_path, chart_path_in_repo="")
+        from pathlib import Path
+        with open(Path(out) / "values-hub.yaml") as f:
+            data = yaml.safe_load(f)
+        app = data["clusterGroup"]["applications"]["rag-quickstart"]
+        assert app["path"] == "."
+
+    def test_explicit_path_preserved(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path, chart_path_in_repo="deploy/helm/rag")
+        from pathlib import Path
+        with open(Path(out) / "values-hub.yaml") as f:
+            data = yaml.safe_load(f)
+        app = data["clusterGroup"]["applications"]["rag-quickstart"]
+        assert app["path"] == "deploy/helm/rag"
