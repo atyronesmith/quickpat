@@ -370,9 +370,6 @@ def _extract_secret_info(content: str, filename: str, info: SubChartInfo):
             field_name = m.group(1)
             field_value = m.group(2).strip()
 
-            if field_name not in info.secret_fields:
-                info.secret_fields.append(field_name)
-
             # Check if it's a computed field (contains printf or multiple .Values refs)
             if 'printf' in field_value or field_value.count('.Values.') > 1:
                 source_fields = re.findall(
@@ -390,6 +387,8 @@ def _extract_secret_info(content: str, filename: str, info: SubChartInfo):
                     template=field_value,
                     source_fields=source_fields,
                 ))
+            elif field_name not in info.secret_fields:
+                info.secret_fields.append(field_name)
 
 
 # ── Go Template Stripping ──────────────────────────────────────────

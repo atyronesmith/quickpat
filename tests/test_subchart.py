@@ -279,6 +279,10 @@ class TestSecretInfoExtraction:
         assert "host" in cf.source_fields
         assert "port" in cf.source_fields
         assert "dbname" in cf.source_fields
+        # Computed fields excluded from secret_fields
+        assert "jdbc-uri" not in info.secret_fields
+        assert "user" in info.secret_fields
+        assert "password" in info.secret_fields
 
     def test_non_secret_template_ignored(self):
         content = (
@@ -303,9 +307,9 @@ class TestSecretInfoExtraction:
         )
         info = SubChartInfo()
         _extract_secret_info(content, "secret.yaml", info)
-        assert "MINIO_ENDPOINT" in info.secret_fields
         assert "MINIO_ACCESS_KEY" in info.secret_fields
-        # MINIO_ENDPOINT has two .Values refs -> computed
+        # MINIO_ENDPOINT has two .Values refs -> computed only
+        assert "MINIO_ENDPOINT" not in info.secret_fields
         assert any(cf.name == "MINIO_ENDPOINT" for cf in info.computed_fields)
 
 
