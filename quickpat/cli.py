@@ -800,9 +800,11 @@ def build_default_config(analysis, args, quickstart_path=None):
 
     # Detect git origin to decide default strategy
     strategy = 'local'
+    git_url = ''
+    chart_path_in_repo = ''
     if quickstart_path:
         analyzer = QuickstartAnalyzer(quickstart_path)
-        git_url, _ = analyzer.detect_git_origin()
+        git_url, chart_path_in_repo = analyzer.detect_git_origin()
         if git_url:
             strategy = 'remote'
 
@@ -816,6 +818,8 @@ def build_default_config(analysis, args, quickstart_path=None):
         'output_dir': args.output or str(Path(args.patterns_dir) / name),
         'clustergroup_version': '0.9.*',
         'tier': 'sandbox',
+        'git_repo_url': git_url,
+        'chart_path_in_repo': chart_path_in_repo,
     }
 
 
