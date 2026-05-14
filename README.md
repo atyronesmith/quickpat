@@ -4,6 +4,21 @@ Convert [Red Hat AI Quickstarts](https://github.com/rh-ai-quickstart) into [Vali
 
 QuickPat analyzes Helm charts, detects required operators, secrets, and GPU requirements, then generates a complete Validated Pattern directory that can be deployed with `./pattern.sh make install`.
 
+## CI Status
+
+Every push to `main` generates all 6 shortlisted patterns, validates them, and publishes to `generated/<name>` branches:
+
+| Quickstart | Branch |
+|------------|--------|
+| RAG | `generated/RAG` |
+| maas-code-assistant | `generated/maas-code-assistant` |
+| product-recommender | `generated/product-recommender` |
+| lemonade-stand | `generated/lemonade-stand` |
+| llm-cpu-serving | `generated/llm-cpu-serving` |
+| data-governance | `generated/data-governance` |
+
+Each branch is a self-contained Validated Pattern ready for deployment. See [Deploying a Generated Pattern](#deploying-a-generated-pattern).
+
 ## What It Does
 
 A typical AI Quickstart ships a Helm chart meant for `helm install`. A Validated Pattern wraps that chart with:
@@ -85,6 +100,25 @@ cd ~/patterns/rag-pattern/
 git init && git add -A && git commit -m "Initial pattern"
 oc login <cluster>
 ./pattern.sh make install
+```
+
+### Deploying a Generated Pattern
+
+CI publishes pre-generated patterns to `generated/<name>` branches. To deploy one on CRC or any OpenShift cluster:
+
+```bash
+git clone -b generated/RAG https://github.com/atyronesmith/quickpat.git /tmp/rag-pattern
+cd /tmp/rag-pattern
+./scripts/deploy.sh
+```
+
+Each generated pattern includes `scripts/` with deploy, undeploy, validate, and status scripts. See `scripts/README.md` in any generated branch for details.
+
+To point an existing Pattern CR at a generated branch:
+
+```bash
+oc patch pattern <name> --type=merge \
+  -p '{"spec":{"gitSpec":{"targetRepo":"https://github.com/atyronesmith/quickpat.git","targetRevision":"generated/RAG"}}}'
 ```
 
 ## CLI Reference
@@ -256,6 +290,14 @@ my-pattern/
 │   ├── values-GCP.yaml
 │   ├── values-IBMCloud.yaml
 │   └── values-None.yaml
+├── scripts/
+│   ├── crc-setup.sh                # CRC cluster setup (32GB, 12 CPU)
+│   ├── deploy.sh                   # Deploy pattern to CRC/OpenShift
+│   ├── undeploy.sh                 # Clean removal of pattern
+│   ├── validate-deployment.sh      # Post-deploy validation checks
+│   ├── status.sh                   # Cluster status report
+│   ├── dsc.yaml                    # DataScienceCluster CR for OpenShift AI
+│   └── README.md                   # Script documentation
 └── docs/
     └── quickstart-analysis.md
 ```
@@ -346,6 +388,9 @@ Copy `skills/transform_quickstart.md` into any LLM's system prompt (ChatGPT, Cla
 
 ```
 quickpat/
+├── .github/
+│   └── workflows/
+│       └── generate-patterns.yml   # CI: generate, validate, publish
 ├── quickpat/
 │   ├── cli.py          # CLI entry point (7 subcommands)
 │   ├── analyzer.py     # Helm chart parser, operator/secret/feature detection
@@ -363,7 +408,7 @@ quickpat/
 │   └── config.py       # Config loader (YAML + defaults)
 ├── skills/
 │   └── transform_quickstart.md   # Text skill for any LLM
-├── tests/              # 276 tests
+├── tests/              # 348 tests
 ├── examples/
 │   └── sample-spec.yaml
 ├── docs/
