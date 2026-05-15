@@ -50,8 +50,8 @@ KNOWN_IGNORE_RULES = {
 }
 ```
 
-This handles the common cases without any LLM call. Build it by surveying existing
-RAG, other VP examples, and ArgoCD community docs on common ignore patterns.
+This handles the common cases without any LLM call. Build it by surveying
+existing VP implementations and ArgoCD community docs on common ignore patterns.
 
 ### Layer 2: LLM Prompt for Unknown CRDs
 

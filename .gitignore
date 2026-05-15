@@ -3,5 +3,6 @@ __pycache__/
 *.pyc
 *.egg-info/
 .env
+.claude/
 quickpat.yaml
 tests/eval/results/

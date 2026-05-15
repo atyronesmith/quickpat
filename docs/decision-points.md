@@ -78,9 +78,9 @@ heuristic at 69% accuracy. All errors fell into two rule-fixable patterns:
    tokens (`*_token` with prefix) before the auto-generate patterns.
 
 After expanding `_classify_secret_field()` with these rules: **100% accuracy**
-on the full corpus. No classifier needed — a decision tree is
-available if future quickstarts surface patterns that can't be expressed as
-rules, but the current coverage is complete.
+on the full corpus. No classifier needed. A decision tree trained on
+LLM-labeled data could handle future edge cases if they arise, but the
+current rule coverage is complete.
 
 ---
 
@@ -117,8 +117,8 @@ analyzer rather than training a model on the review output.
 structured fields the analyzer already extracts. This is better than LLM
 generation because it never hallucinates operator names or deployment
 instructions. The original plan to train a small model for this was the
-motivation for knowledge distillation, but the template approach made it
-unnecessary for this specific use case.
+motivation for exploring knowledge distillation, but the template approach
+made it unnecessary for this specific use case.
 
 ---
 
