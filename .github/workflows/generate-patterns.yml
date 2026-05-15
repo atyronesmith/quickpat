@@ -159,11 +159,10 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pull-requests: write
 
     steps:
-      - uses: actions/checkout@v5
-
       - name: Download all pattern artifacts
         uses: actions/download-artifact@v6
         with:
@@ -234,8 +233,11 @@ jobs:
           COMMENT_BODY=$(cat /tmp/validation-comment.md)
           MARKER="<!-- quickpat-validation-summary -->"
 
+          REPO="${{ github.repository }}"
+          PR="${{ github.event.pull_request.number }}"
+
           # Check for existing comment to update
-          EXISTING=$(gh pr view ${{ github.event.pull_request.number }} \
+          EXISTING=$(gh pr view "$PR" --repo "$REPO" \
             --json comments --jq '.comments[] | select(.body | contains("quickpat-validation-summary")) | .id' \
             2>/dev/null | head -1)
 
@@ -243,10 +245,10 @@ jobs:
           ${COMMENT_BODY}"
 
           if [ -n "$EXISTING" ]; then
-            gh api repos/${{ github.repository }}/issues/comments/${EXISTING} \
+            gh api "repos/${REPO}/issues/comments/${EXISTING}" \
               -X PATCH -f body="$BODY"
           else
-            gh pr comment ${{ github.event.pull_request.number }} --body "$BODY"
+            gh pr comment "$PR" --repo "$REPO" --body "$BODY"
           fi
 
       - name: Upload combined validation reports
