@@ -2,11 +2,7 @@
 
 import pytest
 
-from quickpat.pipeline import (
-    _llm_check_operators,
-    _llm_review_secrets,
-    skill_analyze,
-)
+from quickpat.pipeline import skill_analyze
 from quickpat.providers.base import LLMResponse
 from quickpat.validator import _llm_review, _parse_structured_review, _parse_text_review, Issue
 from tests.conftest import write_chart, write_values
@@ -45,100 +41,6 @@ def _mock_structured_llm(response_dict):
 
 def _mock_text_llm(response_text):
     return _MockTextProvider(response_text)
-
-
-class TestOperatorCheckStructured:
-    def test_returns_valid_operators(self, tmp_path):
-        chart = tmp_path / "helm"
-        write_chart(chart, "test")
-        write_values(chart, {"replicas": 3})
-        analysis = skill_analyze(str(tmp_path))
-
-        llm = _mock_structured_llm({"operators": ["openshift-ai", "nvidia-gpu"]})
-        result = _llm_check_operators(llm, analysis)
-        assert "openshift-ai" in result
-        assert "nvidia-gpu" in result
-
-    def test_filters_invalid_operators(self, tmp_path):
-        chart = tmp_path / "helm"
-        write_chart(chart, "test")
-        write_values(chart, {"replicas": 3})
-        analysis = skill_analyze(str(tmp_path))
-
-        llm = _mock_structured_llm({"operators": ["openshift-ai", "fake-operator"]})
-        result = _llm_check_operators(llm, analysis)
-        assert "openshift-ai" in result
-        assert "fake-operator" not in result
-
-    def test_empty_operators(self, tmp_path):
-        chart = tmp_path / "helm"
-        write_chart(chart, "test")
-        write_values(chart, {"replicas": 3})
-        analysis = skill_analyze(str(tmp_path))
-
-        llm = _mock_structured_llm({"operators": []})
-        result = _llm_check_operators(llm, analysis)
-        assert result == []
-
-    def test_text_fallback(self, tmp_path):
-        chart = tmp_path / "helm"
-        write_chart(chart, "test")
-        write_values(chart, {"replicas": 3})
-        analysis = skill_analyze(str(tmp_path))
-
-        llm = _mock_text_llm("openshift-ai, nvidia-gpu")
-        result = _llm_check_operators(llm, analysis)
-        assert "openshift-ai" in result
-        assert "nvidia-gpu" in result
-
-    def test_text_fallback_none(self, tmp_path):
-        chart = tmp_path / "helm"
-        write_chart(chart, "test")
-        write_values(chart, {"replicas": 3})
-        analysis = skill_analyze(str(tmp_path))
-
-        llm = _mock_text_llm("none")
-        result = _llm_check_operators(llm, analysis)
-        assert result == []
-
-
-class TestSecretReviewStructured:
-    def test_returns_summary_with_false_positives(self, tmp_path):
-        chart = tmp_path / "helm"
-        write_chart(chart, "test")
-        write_values(chart, {"password": "x", "key": "y"})
-        analysis = skill_analyze(str(tmp_path))
-
-        llm = _mock_structured_llm({
-            "false_positives": ["key"],
-            "summary": "key is too generic",
-        })
-        result = _llm_review_secrets(llm, analysis)
-        assert "key" in result
-        assert "generic" in result
-
-    def test_no_false_positives(self, tmp_path):
-        chart = tmp_path / "helm"
-        write_chart(chart, "test")
-        write_values(chart, {"password": "x"})
-        analysis = skill_analyze(str(tmp_path))
-
-        llm = _mock_structured_llm({
-            "false_positives": [],
-            "summary": "All secrets look valid",
-        })
-        result = _llm_review_secrets(llm, analysis)
-        assert "valid" in result.lower()
-
-    def test_text_fallback(self, tmp_path):
-        chart = tmp_path / "helm"
-        write_chart(chart, "test")
-        write_values(chart, {"password": "x"})
-        analysis = skill_analyze(str(tmp_path))
-
-        llm = _mock_text_llm("All secrets look legitimate.")
-        result = _llm_review_secrets(llm, analysis)
-        assert "legitimate" in result
 
 
 class TestValidationReviewStructured:
@@ -208,24 +110,6 @@ class _BadProvider:
 
 
 class TestLLMExceptionHandling:
-    def test_operator_check_handles_exception(self, tmp_path):
-        chart = tmp_path / "helm"
-        write_chart(chart, "test")
-        write_values(chart, {"replicas": 3})
-        analysis = skill_analyze(str(tmp_path))
-
-        result = _llm_check_operators(_BadProvider(), analysis)
-        assert result == []
-
-    def test_secret_review_handles_exception(self, tmp_path):
-        chart = tmp_path / "helm"
-        write_chart(chart, "test")
-        write_values(chart, {"password": "x"})
-        analysis = skill_analyze(str(tmp_path))
-
-        result = _llm_review_secrets(_BadProvider(), analysis)
-        assert result == ""
-
     def test_validation_review_handles_exception(self, tmp_path):
         (tmp_path / "values-global.yaml").write_text("global: {}\n")
 

@@ -38,36 +38,6 @@ class TransformResult:
 
 # ── Response schemas for structured output ─────────────────────────
 
-OPERATOR_CHECK_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "operators": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "Operator keys to add (from the allowed list)",
-        },
-    },
-    "required": ["operators"],
-    "additionalProperties": False,
-}
-
-SECRET_REVIEW_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "false_positives": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "Secret names that are NOT real secrets",
-        },
-        "summary": {
-            "type": "string",
-            "description": "Brief summary of findings",
-        },
-    },
-    "required": ["false_positives", "summary"],
-    "additionalProperties": False,
-}
-
 SECRET_CLASSIFICATION_SCHEMA = {
     "type": "object",
     "properties": {
@@ -91,30 +61,6 @@ SECRET_CLASSIFICATION_SCHEMA = {
         },
     },
     "required": ["secrets"],
-    "additionalProperties": False,
-}
-
-DRIFT_PREDICTION_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "entries": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "group": {"type": "string"},
-                    "kind": {"type": "string"},
-                    "json_pointers": {
-                        "type": "array", "items": {"type": "string"},
-                    },
-                    "reason": {"type": "string"},
-                },
-                "required": ["group", "kind", "json_pointers", "reason"],
-                "additionalProperties": False,
-            },
-        },
-    },
-    "required": ["entries"],
     "additionalProperties": False,
 }
 
@@ -187,24 +133,9 @@ def skill_analyze(quickstart_path: str) -> QuickstartAnalysis:
 # ── Sub-skill: Detect ───────────────────────────────────────────────
 
 
-def skill_detect(
-    analysis: QuickstartAnalysis,
-    llm: Provider = None,
-) -> tuple:
-    """Detect operators and review secrets. LLM enhances if provided."""
-    operators = list(analysis.detected_operators)
-    secrets_review = ""
-
-    if llm and analysis.dependencies:
-        llm_ops = _llm_check_operators(llm, analysis)
-        for op in llm_ops:
-            if op in OPERATORS and op not in operators:
-                operators.append(op)
-
-    if llm and analysis.detected_secrets:
-        secrets_review = _llm_review_secrets(llm, analysis)
-
-    return operators, secrets_review
+def skill_detect(analysis: QuickstartAnalysis) -> tuple:
+    """Detect operators. Keyword matching in analyzer covers all known cases."""
+    return list(analysis.detected_operators), ""
 
 
 # ── Sub-skill: Generate ─────────────────────────────────────────────
@@ -252,31 +183,11 @@ def transform(
         output_dir = str(base / pattern_name)
     result.pattern_dir = output_dir
 
-    # 3. Detect (with optional LLM)
-    operators, secrets_review = skill_detect(analysis, llm)
-    if secrets_review:
-        result.llm_decisions.append(f"LLM secret review: {secrets_review}")
-    if operators != list(analysis.detected_operators):
-        added = set(operators) - set(analysis.detected_operators)
-        if added:
-            result.llm_decisions.append(
-                f"LLM suggested additional operators: {sorted(added)}"
-            )
+    # 3. Detect operators (keyword matching)
+    operators, _ = skill_detect(analysis)
 
-    # 3b. Predict ArgoCD drift from resource types
+    # 3b. Predict ArgoCD drift from static rules
     drift_entries = _static_drift_entries(analysis.resource_types)
-    if llm:
-        unknown = [
-            rt for rt in analysis.resource_types
-            if rt not in KNOWN_IGNORE_RULES
-        ]
-        if unknown:
-            llm_drift = _llm_predict_drift(llm, analysis, unknown)
-            drift_entries.extend(llm_drift)
-    if drift_entries:
-        result.llm_decisions.append(
-            f"Predicted {len(drift_entries)} ArgoCD drift entries"
-        )
 
     # 4. Build config
     config = {
@@ -461,7 +372,7 @@ def transform_remote(
         )
 
     # 6. Build config from profile
-    operators, _ = skill_detect(analysis, llm)
+    operators, _ = skill_detect(analysis)
     config = _profile_to_config(
         profile, analysis, operators, output_dir, pattern_name,
     )
@@ -524,21 +435,15 @@ def _build_new_profile(
                 source_fields=cf.source_fields,
             ))
 
-    # Predict drift — static rules first, LLM for unknowns
+    # Predict drift from static rules
     resource_types = list(analysis.resource_types)
     for sc_info in subchart_info.values():
         for rt in sc_info.resource_types:
             if rt not in resource_types:
                 resource_types.append(rt)
     drift = _static_drift_entries(resource_types)
-    unknown = [rt for rt in resource_types if rt not in KNOWN_IGNORE_RULES]
-    if llm and unknown:
-        drift.extend(_llm_predict_drift(llm, analysis, unknown))
     if drift:
         profile.drift_entries = drift
-        result.llm_decisions.append(
-            f"Predicted {len(drift)} ArgoCD drift entries"
-        )
 
     # Build overrides from secret gates
     overrides = []
@@ -737,101 +642,6 @@ def _llm_classify_secrets(
         pass
 
     return _default_classify_secrets(subchart_info)
-
-
-def _llm_predict_drift(
-    llm: Provider,
-    analysis: QuickstartAnalysis,
-    resource_types: list,
-) -> list:
-    """Ask LLM which resource types will cause ArgoCD drift."""
-    rt_list = "\n".join(
-        f"  - {group}/{kind}" if group else f"  - {kind}"
-        for group, kind in resource_types
-    )
-    operators_list = ", ".join(analysis.detected_operators) or "none"
-    system = (
-        "You are an ArgoCD expert on OpenShift. Given a list of Kubernetes resource types "
-        "and deployed operators, predict which resources will cause drift "
-        "(fields that controllers modify after creation). Return ignoreDifferences entries."
-    )
-    user = (
-        f"Chart: {analysis.name}\n"
-        f"Operators: {operators_list}\n"
-        f"Resource types:\n{rt_list}"
-    )
-
-    try:
-        response = llm.complete(system, user, response_schema=DRIFT_PREDICTION_SCHEMA)
-        result = response.parsed if response.parsed else response.content
-        if isinstance(result, dict):
-            return [
-                DriftEntry(
-                    group=e['group'], kind=e['kind'],
-                    json_pointers=e['json_pointers'],
-                    reason=e.get('reason', ''),
-                )
-                for e in result.get('entries', [])
-            ]
-    except Exception:
-        pass
-
-    return []
-
-
-def _llm_check_operators(llm: Provider, analysis: QuickstartAnalysis) -> list:
-    dep_list = "\n".join(
-        f"- {d.name} {d.version} (from {d.repository or 'local'})"
-        for d in analysis.dependencies
-    )
-    valid_keys = ", ".join(OPERATORS.keys())
-    system = (
-        "You are an OpenShift operator expert. Given a list of Helm chart "
-        "dependencies, identify any that require OpenShift operators not "
-        f"already detected. Only use operator keys from this list: {valid_keys}. "
-        "Return an empty list if none are needed."
-    )
-    user = (
-        f"Chart: {analysis.name}\n"
-        f"Already detected operators: {analysis.detected_operators}\n"
-        f"Dependencies:\n{dep_list}"
-    )
-    try:
-        response = llm.complete(system, user, response_schema=OPERATOR_CHECK_SCHEMA)
-        result = response.parsed if response.parsed else response.content
-        if isinstance(result, dict):
-            return [k for k in result.get("operators", []) if k in OPERATORS]
-        text = result.strip().lower()
-        if text == "none":
-            return []
-        candidates = [k.strip() for k in text.split(",")]
-        return [k for k in candidates if k in OPERATORS]
-    except Exception:
-        return []
-
-
-def _llm_review_secrets(llm: Provider, analysis: QuickstartAnalysis) -> str:
-    secret_list = "\n".join(
-        f"- {s.name} (at {s.path})" for s in analysis.detected_secrets
-    )
-    system = (
-        "You are a security reviewer. Given a list of detected potential "
-        "secrets from a Helm values.yaml, identify any false positives "
-        "(keys that look like secrets but aren't). Be brief."
-    )
-    user = f"Chart: {analysis.name}\nDetected secrets:\n{secret_list}"
-    try:
-        response = llm.complete(system, user, response_schema=SECRET_REVIEW_SCHEMA)
-        result = response.parsed if response.parsed else response.content
-        if isinstance(result, dict):
-            summary = result.get("summary", "")
-            fps = result.get("false_positives", [])
-            if fps:
-                return f"{summary} False positives: {', '.join(fps)}"
-            return summary
-        return result.strip()
-    except Exception:
-        return ""
 
 
 def _list_created_files(output_dir: str, config: dict) -> list:
