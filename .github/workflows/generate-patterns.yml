@@ -34,6 +34,11 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@v5
 
+      - name: Install kubeconform
+        run: |
+          curl -sL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz \
+            | tar xz -C /usr/local/bin
+
       - name: Generate pattern
         run: |
           quickpat create "${{ matrix.quickstart }}" \
@@ -41,7 +46,28 @@ jobs:
             --output "/tmp/${{ matrix.quickstart }}-pattern"
 
       - name: Validate pattern
-        run: quickpat validate "/tmp/${{ matrix.quickstart }}-pattern"
+        id: validate
+        run: |
+          PATTERN_DIR="/tmp/${{ matrix.quickstart }}-pattern"
+          quickpat validate "$PATTERN_DIR" --json > "$PATTERN_DIR/validation-report.json" || true
+          quickpat validate "$PATTERN_DIR"
+
+      - name: Helm lint (local charts)
+        id: helm_lint
+        run: |
+          PATTERN_DIR="/tmp/${{ matrix.quickstart }}-pattern"
+          STATUS="SKIP"
+          for chart_dir in "$PATTERN_DIR"/charts/*/; do
+            [ -f "$chart_dir/Chart.yaml" ] || continue
+            echo "Linting: $chart_dir"
+            if helm lint "$chart_dir" 2>&1; then
+              STATUS="PASS"
+            else
+              STATUS="FAIL"
+            fi
+          done
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "$STATUS" > "$PATTERN_DIR/helm-lint-status.txt"
 
       - name: Helm template (pattern-secrets)
         run: |
@@ -102,11 +128,132 @@ jobs:
             echo "No remote chart URL found — skipping upstream render"
           fi
 
+      - name: Validate manifests (kubeconform)
+        id: kubeconform
+        run: |
+          PATTERN_DIR="/tmp/${{ matrix.quickstart }}-pattern"
+          STATUS="SKIP"
+          for chart_dir in "$PATTERN_DIR"/charts/*/; do
+            [ -f "$chart_dir/Chart.yaml" ] || continue
+            echo "Validating: $(basename "$chart_dir")"
+            RENDERED=$(helm template test "$chart_dir" 2>/dev/null) || continue
+            if echo "$RENDERED" | kubeconform -summary -strict -ignore-missing-schemas 2>&1; then
+              [ "$STATUS" = "SKIP" ] && STATUS="PASS"
+            else
+              STATUS="FAIL"
+            fi
+          done
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "$STATUS" > "$PATTERN_DIR/kubeconform-status.txt"
+
       - name: Upload generated pattern
         uses: actions/upload-artifact@v6
+        if: always()
         with:
           name: "${{ matrix.quickstart }}-pattern"
           path: "/tmp/${{ matrix.quickstart }}-pattern"
+          retention-days: 7
+
+  validate-summary:
+    needs: generate-and-validate
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download all pattern artifacts
+        uses: actions/download-artifact@v6
+        with:
+          pattern: "*-pattern"
+          path: /tmp/patterns
+
+      - name: Generate validation summary
+        run: |
+          QUICKSTARTS="RAG maas-code-assistant product-recommender lemonade-stand llm-cpu-serving data-governance"
+
+          # Build markdown table
+          TABLE="| Quickstart | Status | Errors | Warnings | Helm Lint | Kubeconform |\n"
+          TABLE+="|---|---|---|---|---|---|\n"
+
+          TOTAL=0
+          PASSED=0
+
+          for QS in $QUICKSTARTS; do
+            TOTAL=$((TOTAL + 1))
+            REPORT="/tmp/patterns/${QS}-pattern/validation-report.json"
+            HELM_STATUS="/tmp/patterns/${QS}-pattern/helm-lint-status.txt"
+            KUBE_STATUS="/tmp/patterns/${QS}-pattern/kubeconform-status.txt"
+
+            if [ -f "$REPORT" ]; then
+              VALID=$(python3 -c "import json; d=json.load(open('$REPORT')); print('VALID' if d['valid'] else 'INVALID')" 2>/dev/null || echo "ERROR")
+              ERRORS=$(python3 -c "import json; d=json.load(open('$REPORT')); print(sum(1 for i in d['issues'] if i['severity']=='error'))" 2>/dev/null || echo "?")
+              WARNINGS=$(python3 -c "import json; d=json.load(open('$REPORT')); print(sum(1 for i in d['issues'] if i['severity']=='warning'))" 2>/dev/null || echo "?")
+            else
+              VALID="MISSING"
+              ERRORS="?"
+              WARNINGS="?"
+            fi
+
+            HELM=$(cat "$HELM_STATUS" 2>/dev/null || echo "N/A")
+            KUBE=$(cat "$KUBE_STATUS" 2>/dev/null || echo "N/A")
+
+            if [ "$VALID" = "VALID" ]; then
+              STATUS_ICON="VALID"
+              PASSED=$((PASSED + 1))
+            else
+              STATUS_ICON="INVALID"
+            fi
+
+            TABLE+="| $QS | $STATUS_ICON | $ERRORS | $WARNINGS | $HELM | $KUBE |\n"
+          done
+
+          # Write Job Summary
+          echo "## Pattern Validation Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "$PASSED / $TOTAL patterns valid" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          printf "$TABLE" >> "$GITHUB_STEP_SUMMARY"
+
+          # Save for PR comment
+          {
+            echo "## Pattern Validation Summary"
+            echo ""
+            echo "$PASSED / $TOTAL patterns valid"
+            echo ""
+            printf "$TABLE"
+          } > /tmp/validation-comment.md
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          COMMENT_BODY=$(cat /tmp/validation-comment.md)
+          MARKER="<!-- quickpat-validation-summary -->"
+
+          # Check for existing comment to update
+          EXISTING=$(gh pr view ${{ github.event.pull_request.number }} \
+            --json comments --jq '.comments[] | select(.body | contains("quickpat-validation-summary")) | .id' \
+            2>/dev/null | head -1)
+
+          BODY="${MARKER}
+          ${COMMENT_BODY}"
+
+          if [ -n "$EXISTING" ]; then
+            gh api repos/${{ github.repository }}/issues/comments/${EXISTING} \
+              -X PATCH -f body="$BODY"
+          else
+            gh pr comment ${{ github.event.pull_request.number }} --body "$BODY"
+          fi
+
+      - name: Upload combined validation reports
+        uses: actions/upload-artifact@v6
+        with:
+          name: validation-reports
+          path: /tmp/patterns/*/validation-report.json
           retention-days: 7
 
   publish-branches:

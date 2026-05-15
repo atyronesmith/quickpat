@@ -141,6 +141,10 @@ def main():
         '--max-iterations', type=int, default=3,
         help='Max auto-fix iterations (default: 3)',
     )
+    validate_p.add_argument(
+        '--json', action='store_true', dest='json_output',
+        help='Output results as JSON',
+    )
     _add_llm_args(validate_p)
 
     args = parser.parse_args()
@@ -872,14 +876,19 @@ def cmd_validate(args):
     else:
         result = validate(args.path, llm=llm)
 
-    status = "VALID" if result.valid else "INVALID"
-    print(f"Validation: {status}")
-    for issue in result.issues:
-        fixed = " [FIXED]" if issue.fix_applied else ""
-        print(f"  [{issue.severity}] {issue.file}: {issue.message}{fixed}")
-    if result.fixes_applied:
-        print(f"\nAuto-fixes applied: {result.fixes_applied}")
-        print(f"Iterations: {result.iterations}")
+    if args.json_output:
+        import json
+        from dataclasses import asdict
+        print(json.dumps(asdict(result), indent=2))
+    else:
+        status = "VALID" if result.valid else "INVALID"
+        print(f"Validation: {status}")
+        for issue in result.issues:
+            fixed = " [FIXED]" if issue.fix_applied else ""
+            print(f"  [{issue.severity}] {issue.file}: {issue.message}{fixed}")
+        if result.fixes_applied:
+            print(f"\nAuto-fixes applied: {result.fixes_applied}")
+            print(f"Iterations: {result.iterations}")
     sys.exit(0 if result.valid else 1)
 
 
