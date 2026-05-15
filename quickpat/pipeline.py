@@ -570,26 +570,48 @@ def _profile_to_config(
     return config
 
 
-def _default_classify_secrets(subchart_info) -> list:
-    """Classify secrets without LLM — uses heuristics."""
-    decisions = []
-    password_patterns = {'password', 'passwd', 'secret', 'token', 'api_key', 'apikey'}
-    config_patterns = {'host', 'port', 'dbname', 'database', 'user', 'username', 'endpoint'}
+def _classify_secret_field(field_name: str) -> str:
+    """Classify a single secret field by name pattern."""
+    fn = field_name.lower().replace('-', '_')
 
+    # Externally-issued credentials: check before auto-generate patterns
+    # because these contain "secret"/"token"/"key" but aren't auto-generated
+    credential_compounds = {
+        'access_key', 'secret_key', 'secret_access',
+        'credentials', 'credential',
+    }
+    if any(c in fn for c in credential_compounds):
+        return 'vault-secret'
+    # Service-prefixed tokens (HF_TOKEN, GOOGLE_TOKEN, etc.)
+    if fn.endswith('_token') and '_' in fn:
+        return 'vault-secret'
+
+    # Auto-generated: passwords and keys the system creates
+    autogen_patterns = {'password', 'passwd'}
+    if any(p in fn for p in autogen_patterns):
+        return 'auto-generate'
+
+    # Static config: infrastructure settings with sensible defaults
+    config_patterns = {
+        'host', 'port', 'dbname', 'database', 'user', 'username', 'endpoint',
+        'url', 'source', 'model', 'version', 'bucket', 'region',
+        'schema', 'mode', 'service', 'name', 'namespace', 'connection',
+    }
+    if any(p in fn for p in config_patterns):
+        return 'static-config'
+
+    return 'vault-secret'
+
+
+def _default_classify_secrets(subchart_info) -> list:
+    """Classify secrets without LLM — uses field name heuristics."""
+    decisions = []
     for sc_name, sc_info in subchart_info.items():
         for field_name in sc_info.secret_fields:
-            fn_lower = field_name.lower().replace('-', '_')
-            if any(p in fn_lower for p in password_patterns):
-                classification = 'auto-generate'
-            elif any(p in fn_lower for p in config_patterns):
-                classification = 'static-config'
-            else:
-                classification = 'vault-secret'
-
             decisions.append(SecretDecision(
                 name=field_name,
                 group=sc_name,
-                classification=classification,
+                classification=_classify_secret_field(field_name),
                 vault_key=field_name,
                 source_path=f"{sc_name}.secret.{field_name}",
             ))

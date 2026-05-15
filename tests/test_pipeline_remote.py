@@ -40,14 +40,13 @@ class TestDefaultClassifySecrets:
         decisions = _default_classify_secrets({"pgvector": info})
         assert all(d.classification == "static-config" for d in decisions)
 
-    def test_token_gets_vault_secret(self):
+    def test_service_prefixed_token_gets_vault_secret(self):
         info = SubChartInfo(
             name="llm-service", version="0.5.9",
             secret_fields=["hf_token"],
         )
         decisions = _default_classify_secrets({"llm-service": info})
-        # hf_token contains "token" which is in password_patterns
-        assert decisions[0].classification == "auto-generate"
+        assert decisions[0].classification == "vault-secret"
 
     def test_unknown_field_gets_vault_secret(self):
         info = SubChartInfo(
