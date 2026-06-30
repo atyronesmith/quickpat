@@ -247,7 +247,7 @@ def cmd_analyze(args):
 
     print_analysis(analysis)
 
-    pattern_name = args.name or f"{analysis.name}-pattern"
+    pattern_name = args.name or analysis.name
     output_dir = Path(args.output or str(Path(args.patterns_dir) / pattern_name))
     docs_dir = output_dir / 'docs'
     docs_dir.mkdir(parents=True, exist_ok=True)
@@ -400,7 +400,7 @@ def cmd_batch(args):
                 break
             continue
 
-        pattern_name = f"{name}-pattern"
+        pattern_name = name
         output_dir = str(output_root / pattern_name)
 
         try:
@@ -618,7 +618,7 @@ def interactive_config(analysis, args):
 
     print("--- Configuration ---\n")
 
-    default_name = args.name or f"{analysis.name}-pattern"
+    default_name = args.name or analysis.name
     config['pattern_name'] = ask("Pattern name", default_name)
     config['app_name'] = ask("Application name", analysis.name)
     config['app_namespace'] = ask("Target namespace", analysis.name)
@@ -800,7 +800,7 @@ def cmd_update(args):
 
 
 def build_default_config(analysis, args, quickstart_path=None):
-    name = args.name or f"{analysis.name}-pattern"
+    name = args.name or analysis.name
 
     # Detect git origin to decide default strategy
     strategy = 'local'

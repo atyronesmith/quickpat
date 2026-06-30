@@ -37,6 +37,7 @@ class PatternGenerator:
         self._generate_scripts()
         self._generate_readme()
         self._generate_report()
+        self._generate_license()
 
         # Copy charts with local strategy (per-chart or global default)
         default_strategy = self.config.get('chart_strategy', 'local')
@@ -59,19 +60,16 @@ class PatternGenerator:
     # ── values-global.yaml ──────────────────────────────────────────
 
     def _generate_values_global(self):
-        # main: is a root-level key, NOT nested under global:
-        global_opts = self.config.get('global_options', {})
         data = {
             'global': {
                 'pattern': self.config['pattern_name'],
-                'options': {
-                    'useCSV': False,
-                    'syncPolicy': global_opts.get('syncPolicy', 'Automatic'),
-                    'installPlanApproval': global_opts.get('installPlanApproval', 'Automatic'),
-                },
+                'singleArgoCD': True,
+                'secretLoader': {'disabled': False},
             },
             'main': {
-                'clusterGroupName': 'hub',
+                'clusterGroupName': self.config.get(
+                    'cluster_group_name', 'hub'
+                ),
                 'multiSourceConfig': {
                     'enabled': True,
                     'clusterGroupChartVersion': self.config.get(
@@ -99,20 +97,18 @@ class PatternGenerator:
             app_name, app_namespace, use_vault
         )
 
+        group_name = self.config.get('cluster_group_name', 'hub')
         data = {
             'clusterGroup': {
-                'name': 'hub',
-                'isHubCluster': True,
+                'name': group_name,
                 'namespaces': namespaces,
                 'subscriptions': subscriptions,
-                'projects': ['hub'],
-                'sharedValueFiles': [
-                    '/overrides/values-{{ $.Values.global.clusterPlatform }}.yaml',
-                ],
                 'applications': applications,
             }
         }
-        self._write_yaml(self.output_dir / 'values-hub.yaml', data)
+        self._write_yaml(
+            self.output_dir / f'values-{group_name}.yaml', data
+        )
 
     def _get_app_charts(self):
         """Return list of (app_name, namespace, ChartInfo) for all charts."""
@@ -135,7 +131,7 @@ class PatternGenerator:
         # Infrastructure namespaces
         if use_vault:
             for ns in ('vault', 'golang-external-secrets'):
-                namespaces.append(ns)
+                namespaces.append({ns: {}})
                 seen.add(ns)
 
         # Operator namespaces
@@ -150,10 +146,9 @@ class PatternGenerator:
             if ns_config:
                 namespaces.append({ns: ns_config})
             else:
-                namespaces.append(ns)
+                namespaces.append({ns: {}})
 
         # Application namespaces — only add OAI labels where needed
-        # Pre-compute: if ANY chart in a namespace needs labels, the namespace gets them
         app_charts = self._get_app_charts()
         ns_needs_labels = set()
         for _, ns, ci in app_charts:
@@ -174,7 +169,7 @@ class PatternGenerator:
                     },
                 }})
             else:
-                namespaces.append(ns)
+                namespaces.append({ns: {}})
 
         return namespaces
 
@@ -182,24 +177,26 @@ class PatternGenerator:
         subscriptions = {}
         for op_key in operators:
             op = OPERATORS[op_key]
+            sub_key = op.get('subscription_key', op_key)
             sub = {
                 'name': op['subscription_name'],
                 'namespace': op['namespace'],
             }
             if op.get('source') and op['source'] != 'redhat-operators':
                 sub['source'] = op['source']
-            subscriptions[op_key] = sub
+            subscriptions[sub_key] = sub
         return subscriptions
 
     def _build_applications(self, app_name, app_namespace, use_vault):
         applications = {}
+        group_name = self.config.get('cluster_group_name', 'hub')
 
         # Vault and external secrets (standard infrastructure)
         if use_vault:
             applications['vault'] = {
                 'name': 'vault',
                 'namespace': 'vault',
-                'project': 'hub',
+                'project': group_name,
                 'chart': 'hashicorp-vault',
                 'chartVersion': cfg(
                     "infrastructure.vault_chart_version", "0.1.*"
@@ -208,7 +205,7 @@ class PatternGenerator:
             applications['golang-external-secrets'] = {
                 'name': 'golang-external-secrets',
                 'namespace': 'golang-external-secrets',
-                'project': 'hub',
+                'project': group_name,
                 'chart': 'golang-external-secrets',
                 'chartVersion': cfg(
                     "infrastructure.external_secrets_chart_version", "0.2.*"
@@ -224,7 +221,7 @@ class PatternGenerator:
                 applications[name] = {
                     'name': name,
                     'namespace': ns,
-                    'project': 'hub',
+                    'project': group_name,
                     'path': f'charts/all/{name}',
                 }
             elif strategy == 'remote':
@@ -234,7 +231,7 @@ class PatternGenerator:
                 app_entry = {
                     'name': name,
                     'namespace': ns,
-                    'project': 'hub',
+                    'project': group_name,
                     'repoURL': git_url,
                     'path': chart_path,
                     'chartVersion': self.config.get('chart_branch', 'main'),
@@ -251,7 +248,7 @@ class PatternGenerator:
                 applications[name] = {
                     'name': name,
                     'namespace': ns,
-                    'project': 'hub',
+                    'project': group_name,
                     'repoURL': repo_url,
                     'chart': name,
                     'targetRevision': self.config.get(
@@ -265,7 +262,7 @@ class PatternGenerator:
             applications['pattern-secrets'] = {
                 'name': 'pattern-secrets',
                 'namespace': app_namespace,
-                'project': 'hub',
+                'project': group_name,
                 'path': 'charts/pattern-secrets',
             }
 
@@ -381,21 +378,24 @@ class PatternGenerator:
 
     def _generate_makefile(self):
         content = (
+            "# Generated by quickpat\n"
+            "# Add custom targets above or below the include line\n"
+            "\n"
             "include Makefile-common\n"
         )
         (self.output_dir / 'Makefile').write_text(content)
 
     def _generate_makefile_common(self):
-        # Matches the standard Makefile-common from validated patterns
         content = (
             'MAKEFLAGS += --no-print-directory\n'
-            'ANSIBLE_STDOUT_CALLBACK ?= null\n'
-            'ANSIBLE_RUN := ANSIBLE_STDOUT_CALLBACK='
+            'ANSIBLE_STDOUT_CALLBACK ?= rhvp.cluster_utils.readable\n'
+            'ANSIBLE_RUN ?= ANSIBLE_STDOUT_CALLBACK='
             '$(ANSIBLE_STDOUT_CALLBACK) ansible-playbook '
             '$(EXTRA_PLAYBOOK_OPTS)\n'
             '\n'
             '.PHONY: help\n'
             'help: ## Print this help message\n'
+            '\t@echo "Documentation: https://validatedpatterns.io/"\n'
             '\t@awk \'BEGIN {FS = ":.*##"; printf "\\nUsage:\\n'
             '  make \\033[36m<target>\\033[0m\\n"} '
             '/^(\\s|[a-zA-Z_0-9-])+:.*?##/ '
@@ -405,12 +405,12 @@ class PatternGenerator:
             '\n'
             '##@ Pattern Install Tasks\n'
             '.PHONY: show\n'
-            'show: ## Shows the template that would be applied\n'
+            'show: ## Shows the template that would be applied by the \'make install\' target\n'
             '\t@$(ANSIBLE_RUN) rhvp.cluster_utils.show\n'
             '\n'
             '.PHONY: operator-deploy\n'
             'operator-deploy operator-upgrade: '
-            '## Installs/updates the pattern (no secrets)\n'
+            '## Installs/updates the pattern on a cluster (DOES NOT load secrets)\n'
             '\t@$(ANSIBLE_RUN) rhvp.cluster_utils.operator_deploy\n'
             '\n'
             '.PHONY: install\n'
@@ -418,15 +418,15 @@ class PatternGenerator:
             '## Installs the pattern onto a cluster\n'
             '\n'
             '.PHONY: uninstall\n'
-            'uninstall: ## Uninstall notice\n'
-            '\t@echo "Uninstall is not yet implemented."\n'
+            'uninstall: ## Uninstall the pattern (EXPERIMENTAL)\n'
+            '\t@$(ANSIBLE_RUN) rhvp.cluster_utils.uninstall\n'
             '\n'
             '.PHONY: pattern-install\n'
             'pattern-install:\n'
             '\t@$(ANSIBLE_RUN) rhvp.cluster_utils.install\n'
             '\n'
             '.PHONY: load-secrets\n'
-            'load-secrets: ## Loads secrets onto the cluster\n'
+            'load-secrets: ## Loads secrets onto the cluster (unless explicitly disabled in values-global.yaml)\n'
             '\t@$(ANSIBLE_RUN) rhvp.cluster_utils.load_secrets\n'
             '\n'
             '##@ Validation Tasks\n'
@@ -457,7 +457,7 @@ class PatternGenerator:
     def _generate_pattern_sh(self):
         # Standard utility container runner, identical across all patterns
         content = r'''#!/bin/bash
-set -eo pipefail
+set -euo pipefail
 
 function is_available {
   command -v "$1" >/dev/null 2>&1 || { echo >&2 "$1 is required but it's not installed. Aborting."; exit 1; }
@@ -603,6 +603,9 @@ podman run -it --rm --pull=newer \
             ':./ansible/plugins/filter'
             ':/usr/share/ansible/plugins/filter\n'
             'collections_path=/usr/share/ansible/collections\n'
+            '\n'
+            '[inventory]\n'
+            'inventory_unparsed_warning=False\n'
         )
         (self.output_dir / 'ansible.cfg').write_text(content)
 
@@ -623,6 +626,20 @@ podman run -it --rm --pull=newer \
             'super-linter.log\n'
         )
         (self.output_dir / '.gitignore').write_text(content)
+
+    # ── LICENSE ─────────────────────────────────────────────────────
+
+    def _generate_license(self):
+        content = (
+            'Apache License\n'
+            'Version 2.0, January 2004\n'
+            'http://www.apache.org/licenses/\n'
+            '\n'
+            'TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION\n'
+            '\n'
+            'See http://www.apache.org/licenses/LICENSE-2.0 for full terms.\n'
+        )
+        (self.output_dir / 'LICENSE').write_text(content)
 
     # ── overrides/ ──────────────────────────────────────────────────
 

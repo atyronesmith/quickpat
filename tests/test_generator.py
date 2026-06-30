@@ -139,12 +139,9 @@ class TestGroupedNamespaces:
         with open(Path(out) / "values-hub.yaml") as f:
             data = yaml.safe_load(f)
         namespaces = data["clusterGroup"]["namespaces"]
-        # Extract namespace names (could be string or dict key)
         ns_names = []
         for ns in namespaces:
-            if isinstance(ns, str):
-                ns_names.append(ns)
-            elif isinstance(ns, dict):
+            if isinstance(ns, dict):
                 ns_names.extend(ns.keys())
         # "observability" should appear exactly once
         assert ns_names.count("observability") == 1
@@ -205,29 +202,24 @@ class TestNewConfigKeys:
             data = yaml.safe_load(f)
         assert data["tier"] == "sandbox"
 
-    def test_global_options_sync_policy(self, single_chart_quickstart, tmp_path):
-        out, _, _ = _generate(single_chart_quickstart, tmp_path,
-                              global_options={"syncPolicy": "Manual"})
-        from pathlib import Path
-        with open(Path(out) / "values-global.yaml") as f:
-            data = yaml.safe_load(f)
-        assert data["global"]["options"]["syncPolicy"] == "Manual"
-
-    def test_global_options_install_plan(self, single_chart_quickstart, tmp_path):
-        out, _, _ = _generate(single_chart_quickstart, tmp_path,
-                              global_options={"installPlanApproval": "Manual"})
-        from pathlib import Path
-        with open(Path(out) / "values-global.yaml") as f:
-            data = yaml.safe_load(f)
-        assert data["global"]["options"]["installPlanApproval"] == "Manual"
-
-    def test_global_options_default_automatic(self, single_chart_quickstart, tmp_path):
+    def test_global_single_argocd(self, single_chart_quickstart, tmp_path):
         out, _, _ = _generate(single_chart_quickstart, tmp_path)
         from pathlib import Path
         with open(Path(out) / "values-global.yaml") as f:
             data = yaml.safe_load(f)
-        assert data["global"]["options"]["syncPolicy"] == "Automatic"
-        assert data["global"]["options"]["installPlanApproval"] == "Automatic"
+        assert data["global"]["singleArgoCD"] is True
+        assert data["global"]["secretLoader"]["disabled"] is False
+        assert "options" not in data["global"]
+
+    def test_configurable_cluster_group_name(self, single_chart_quickstart, tmp_path):
+        out, _, _ = _generate(single_chart_quickstart, tmp_path,
+                              cluster_group_name="prod")
+        from pathlib import Path
+        with open(Path(out) / "values-global.yaml") as f:
+            data = yaml.safe_load(f)
+        assert data["main"]["clusterGroupName"] == "prod"
+        assert (Path(out) / "values-prod.yaml").exists()
+        assert not (Path(out) / "values-hub.yaml").exists()
 
     def test_secret_config_skip(self, single_chart_quickstart, tmp_path):
         out, _, _ = _generate(single_chart_quickstart, tmp_path,
@@ -668,11 +660,11 @@ class TestScriptsGeneration:
         assert "set -eo pipefail" in deploy
         assert "set -euo pipefail" not in deploy
 
-    def test_pattern_sh_uses_eo_pipefail(self, single_chart_quickstart, tmp_path):
+    def test_pattern_sh_uses_euo_pipefail(self, single_chart_quickstart, tmp_path):
         out, _, _ = _generate(single_chart_quickstart, tmp_path)
         from pathlib import Path
         pattern_sh = (Path(out) / "pattern.sh").read_text()
-        assert "set -eo pipefail" in pattern_sh
+        assert "set -euo pipefail" in pattern_sh
 
 
 class TestRemotePathFallback:

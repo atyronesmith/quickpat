@@ -177,7 +177,7 @@ def transform(
 
     # 2. Resolve names
     if not pattern_name:
-        pattern_name = f"{analysis.name}-pattern"
+        pattern_name = analysis.name
     if not output_dir:
         base = Path(cfg("pattern.output_dir", "~/patterns")).expanduser()
         output_dir = str(base / pattern_name)
@@ -332,7 +332,7 @@ def transform_remote(
 
     # 3. Resolve names
     if not pattern_name:
-        pattern_name = f"{analysis.name}-pattern"
+        pattern_name = analysis.name
     if not output_dir:
         base = Path(cfg("pattern.output_dir", "~/patterns")).expanduser()
         output_dir = str(base / pattern_name)

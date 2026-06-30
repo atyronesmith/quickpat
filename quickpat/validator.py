@@ -98,11 +98,31 @@ def validate_and_fix(
 # ── Deterministic checks ────────────────────────────────────────────
 
 
+def _find_values_hub_file(out: Path) -> str:
+    """Find the values-{clusterGroupName}.yaml file."""
+    if (out / "values-hub.yaml").exists():
+        return "values-hub.yaml"
+    global_path = out / "values-global.yaml"
+    if global_path.exists():
+        data = _load_yaml(global_path)
+        if data:
+            group_name = (data.get("main") or {}).get("clusterGroupName", "hub")
+            candidate = f"values-{group_name}.yaml"
+            if (out / candidate).exists():
+                return candidate
+    for p in out.glob("values-*.yaml"):
+        name = p.name
+        if name not in ("values-global.yaml", "values-secret.yaml.template"):
+            return name
+    return "values-hub.yaml"
+
+
 def _check_file_structure(out: Path) -> list:
     issues = []
+    values_hub = _find_values_hub_file(out)
     required = [
         "values-global.yaml",
-        "values-hub.yaml",
+        values_hub,
         "Makefile",
         "pattern.sh",
         "Makefile-common",
@@ -162,38 +182,29 @@ def _check_values_global(out: Path) -> list:
 
 def _check_values_hub(out: Path, config: dict = None) -> list:
     issues = []
-    path = out / "values-hub.yaml"
+    hub_file = _find_values_hub_file(out)
+    path = out / hub_file
     if not path.exists():
         return issues
 
     data = _load_yaml(path)
     if not data:
-        issues.append(Issue("values-hub.yaml", "error", "File is empty or invalid YAML"))
+        issues.append(Issue(hub_file, "error", "File is empty or invalid YAML"))
         return issues
 
     cg = data.get("clusterGroup", {})
     if not cg:
-        issues.append(Issue("values-hub.yaml", "error", "Missing clusterGroup: key"))
+        issues.append(Issue(hub_file, "error", "Missing clusterGroup: key"))
         return issues
 
     projects = cg.get("projects")
-    if projects is None:
-        issues.append(Issue("values-hub.yaml", "warning", "Missing projects: key"))
-    elif not isinstance(projects, list):
-        issues.append(Issue("values-hub.yaml", "error", "projects: must be a list"))
-
-    svf = cg.get("sharedValueFiles")
-    if not svf:
-        issues.append(Issue(
-            "values-hub.yaml", "warning",
-            "Missing sharedValueFiles — platform overrides won't load",
-            auto_fixable=True,
-        ))
+    if projects is not None and not isinstance(projects, list):
+        issues.append(Issue(hub_file, "error", "projects: must be a list"))
 
     subs = cg.get("subscriptions")
     if subs is not None and not isinstance(subs, dict):
         issues.append(Issue(
-            "values-hub.yaml", "error",
+            hub_file, "error",
             "subscriptions: must be a dict (not a list)",
         ))
 
@@ -204,7 +215,7 @@ def _check_values_hub(out: Path, config: dict = None) -> list:
             app = apps[infra_app]
             if "path" in app and "chart" not in app:
                 issues.append(Issue(
-                    "values-hub.yaml", "error",
+                    hub_file, "error",
                     f"Infrastructure app '{infra_app}' uses path: but should use chart: + chartVersion:",
                     auto_fixable=True,
                 ))
@@ -217,13 +228,12 @@ def _check_values_hub(out: Path, config: dict = None) -> list:
         has_repo = "repoURL" in app or "chart" in app
         if not has_path and not has_repo:
             issues.append(Issue(
-                "values-hub.yaml", "warning",
+                hub_file, "warning",
                 f"App '{app_name}' has neither path: nor repoURL:/chart:",
             ))
-        # Only check local path prefix for apps without repoURL (local charts)
         if has_path and "repoURL" not in app and not any(app["path"].startswith(p) for p in valid_path_prefixes):
             issues.append(Issue(
-                "values-hub.yaml", "error",
+                hub_file, "error",
                 f"App '{app_name}' path should start with charts/all/ or charts/pattern-secrets, got: {app['path']}",
                 auto_fixable=True,
             ))

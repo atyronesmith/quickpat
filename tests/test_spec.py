@@ -223,7 +223,7 @@ class TestCreateFromSpec:
         with open(p / "values-hub.yaml") as f:
             hub = yaml.safe_load(f)
         subs = hub["clusterGroup"]["subscriptions"]
-        assert "nvidia-gpu" in subs
+        assert "nvidia" in subs
 
     def test_end_to_end_external_chart(self, tmp_path):
         spec_file = _write_spec(tmp_path / "spec.yaml", {

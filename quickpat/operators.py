@@ -2,6 +2,7 @@
 
 OPERATORS = {
     'openshift-ai': {
+        'subscription_key': 'rhoai',
         'subscription_name': 'rhods-operator',
         'display_name': 'Red Hat OpenShift AI',
         'namespace': 'redhat-ods-operator',
@@ -31,6 +32,7 @@ OPERATORS = {
         'co_dependencies': [],
     },
     'nvidia-gpu': {
+        'subscription_key': 'nvidia',
         'subscription_name': 'gpu-operator-certified',
         'display_name': 'NVIDIA GPU Operator',
         'namespace': 'nvidia-gpu-operator',
