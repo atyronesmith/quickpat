@@ -93,7 +93,7 @@ jobs:
               data = yaml.safe_load(f)
           apps = data.get('clusterGroup', {}).get('applications', {})
           for name, app in apps.items():
-              if name in ('vault', 'golang-external-secrets', 'pattern-secrets'):
+              if name in ('vault', 'openshift-external-secrets', 'golang-external-secrets', 'pattern-secrets', 'dsc', 'nfd', 'nvidia-config'):
                   continue
               url = app.get('repoURL', '')
               if url:
@@ -107,7 +107,7 @@ jobs:
               data = yaml.safe_load(f)
           apps = data.get('clusterGroup', {}).get('applications', {})
           for name, app in apps.items():
-              if name in ('vault', 'golang-external-secrets', 'pattern-secrets'):
+              if name in ('vault', 'openshift-external-secrets', 'golang-external-secrets', 'pattern-secrets', 'dsc', 'nfd', 'nvidia-config'):
                   continue
               path = app.get('path', '.')
               if path:
