@@ -220,7 +220,7 @@ def _check_values_hub(out: Path, config: dict = None) -> list:
                     auto_fixable=True,
                 ))
 
-    valid_path_prefixes = ('charts/all/', 'charts/pattern-secrets')
+    valid_path_prefixes = ('charts/all/', 'charts/pattern-secrets', 'charts/')
     for app_name, app in apps.items():
         if app_name in ("vault", "openshift-external-secrets", "golang-external-secrets"):
             continue

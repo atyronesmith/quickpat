@@ -8,7 +8,7 @@ import yaml
 
 from .analyzer import QuickstartAnalysis, ChartInfo
 from .config import get as cfg
-from .operators import OPERATORS
+from .operators import OPERATORS, INFRA_CHARTS
 
 
 class PatternGenerator:
@@ -34,6 +34,7 @@ class PatternGenerator:
         self._generate_ansible_lint()
         self._generate_gitignore()
         self._generate_overrides()
+        self._generate_infra_charts()
         self._generate_scripts()
         self._generate_readme()
         self._generate_report()
@@ -226,6 +227,19 @@ class PatternGenerator:
                     "infrastructure.external_secrets_chart_version", "0.0.*"
                 ),
             }
+
+        # Infrastructure config charts (operator CRs)
+        operators = self.config.get('operators', [])
+        for op_key in operators:
+            if op_key in INFRA_CHARTS:
+                ic = INFRA_CHARTS[op_key]
+                chart_name = ic['chart_name']
+                applications[chart_name] = {
+                    'name': chart_name,
+                    'namespace': ic['namespace'],
+                    'project': group_name,
+                    'path': f'charts/{chart_name}',
+                }
 
         # Application chart(s)
         default_strategy = self.config.get('chart_strategy', 'local')
@@ -641,6 +655,35 @@ podman run -it --rm --pull=newer \
             'super-linter.log\n'
         )
         (self.output_dir / '.gitignore').write_text(content)
+
+    # ── Infrastructure charts (operator CRs) ─────────────────────────
+
+    def _generate_infra_charts(self):
+        operators = self.config.get('operators', [])
+        for op_key in operators:
+            if op_key not in INFRA_CHARTS:
+                continue
+            ic = INFRA_CHARTS[op_key]
+            chart_dir = self.output_dir / 'charts' / ic['chart_name']
+            tmpl_dir = chart_dir / 'templates'
+            tmpl_dir.mkdir(parents=True, exist_ok=True)
+
+            self._write_yaml(chart_dir / 'Chart.yaml', {
+                'apiVersion': 'v2',
+                'name': ic['chart_name'],
+                'description': ic['description'],
+                'version': '0.1.0',
+                'type': 'application',
+            })
+
+            self._write_yaml(chart_dir / 'values.yaml', {
+                'global': {'pattern': ''},
+            })
+
+            self._write_yaml(
+                tmpl_dir / ic['template_name'],
+                ic['cr'],
+            )
 
     # ── LICENSE ─────────────────────────────────────────────────────
 
