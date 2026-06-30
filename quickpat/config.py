@@ -27,7 +27,7 @@ DEFAULTS = {
     },
     "infrastructure": {
         "vault_chart_version": "0.1.*",
-        "external_secrets_chart_version": "0.2.*",
+        "external_secrets_chart_version": "0.0.*",
     },
     "registry": {
         "quickstart_url": (

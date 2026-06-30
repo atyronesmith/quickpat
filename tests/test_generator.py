@@ -303,7 +303,7 @@ class TestVaultDisabled:
             data = yaml.safe_load(f)
         apps = data["clusterGroup"]["applications"]
         assert "vault" not in apps
-        assert "golang-external-secrets" not in apps
+        assert "openshift-external-secrets" not in apps
 
 
 class TestTransformComputedTemplate:

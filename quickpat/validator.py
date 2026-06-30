@@ -210,7 +210,7 @@ def _check_values_hub(out: Path, config: dict = None) -> list:
 
     apps = cg.get("applications", {})
 
-    for infra_app in ("vault", "golang-external-secrets"):
+    for infra_app in ("vault", "openshift-external-secrets", "golang-external-secrets"):
         if infra_app in apps:
             app = apps[infra_app]
             if "path" in app and "chart" not in app:
@@ -222,7 +222,7 @@ def _check_values_hub(out: Path, config: dict = None) -> list:
 
     valid_path_prefixes = ('charts/all/', 'charts/pattern-secrets')
     for app_name, app in apps.items():
-        if app_name in ("vault", "golang-external-secrets"):
+        if app_name in ("vault", "openshift-external-secrets", "golang-external-secrets"):
             continue
         has_path = "path" in app
         has_repo = "repoURL" in app or "chart" in app
@@ -391,7 +391,7 @@ def _check_remote_strategy(out: Path, apps: dict) -> list:
     remote_apps = {
         name: app for name, app in apps.items()
         if "repoURL" in app and "path" in app and "chart" not in app
-        and name not in ("vault", "golang-external-secrets")
+        and name not in ("vault", "openshift-external-secrets", "golang-external-secrets")
     }
     if not remote_apps:
         return issues
@@ -449,7 +449,7 @@ Validate this Validated Pattern against these rules:
 
 1. values-global.yaml: main: must be a root-level key (sibling of global:, NOT nested under it)
 2. values-global.yaml: multiSourceConfig.enabled must be true
-3. values-hub.yaml: vault + golang-external-secrets apps must be present if vault is enabled
+3. values-hub.yaml: vault + openshift-external-secrets apps must be present if vault is enabled
 4. values-hub.yaml: Infrastructure apps (vault, external-secrets) must use chart: + chartVersion: (NOT path:)
 5. values-hub.yaml: Application apps should use path: charts/all/<name> (local) or repoURL: (external)
 6. values-hub.yaml: sharedValueFiles must reference the overrides template
@@ -723,7 +723,7 @@ def _fix_chart_path(path: Path) -> bool:
     apps = data.get("clusterGroup", {}).get("applications", {})
     changed = False
     for app_name, app in apps.items():
-        if app_name in ("vault", "golang-external-secrets"):
+        if app_name in ("vault", "openshift-external-secrets", "golang-external-secrets"):
             continue
         p = app.get("path", "")
         if p and not p.startswith("charts/all/"):
@@ -761,8 +761,8 @@ def _fix_infra_app_chart(path: Path, message: str) -> bool:
             "chart": "hashicorp-vault",
             "chartVersion": cfg("infrastructure.vault_chart_version", "0.1.*"),
         },
-        "golang-external-secrets": {
-            "chart": "golang-external-secrets",
+        "openshift-external-secrets": {
+            "chart": "openshift-external-secrets",
             "chartVersion": cfg("infrastructure.external_secrets_chart_version", "0.2.*"),
         },
     }

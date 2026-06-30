@@ -130,9 +130,16 @@ class PatternGenerator:
 
         # Infrastructure namespaces
         if use_vault:
-            for ns in ('vault', 'golang-external-secrets'):
+            for ns in ('vault',):
                 namespaces.append({ns: {}})
                 seen.add(ns)
+            namespaces.append({'external-secrets-operator': {
+                'operatorGroup': True,
+                'targetNamespaces': [],
+            }})
+            seen.add('external-secrets-operator')
+            namespaces.append({'external-secrets': {}})
+            seen.add('external-secrets')
 
         # Operator namespaces
         for op_key in operators:
@@ -185,6 +192,14 @@ class PatternGenerator:
             if op.get('source') and op['source'] != 'redhat-operators':
                 sub['source'] = op['source']
             subscriptions[sub_key] = sub
+
+        if self.config.get('use_vault'):
+            subscriptions['openshift-external-secrets'] = {
+                'name': 'openshift-external-secrets-operator',
+                'namespace': 'external-secrets-operator',
+                'channel': 'stable-v1',
+            }
+
         return subscriptions
 
     def _build_applications(self, app_name, app_namespace, use_vault):
@@ -202,13 +217,13 @@ class PatternGenerator:
                     "infrastructure.vault_chart_version", "0.1.*"
                 ),
             }
-            applications['golang-external-secrets'] = {
-                'name': 'golang-external-secrets',
-                'namespace': 'golang-external-secrets',
+            applications['openshift-external-secrets'] = {
+                'name': 'openshift-external-secrets',
+                'namespace': 'external-secrets',
                 'project': group_name,
-                'chart': 'golang-external-secrets',
+                'chart': 'openshift-external-secrets',
                 'chartVersion': cfg(
-                    "infrastructure.external_secrets_chart_version", "0.2.*"
+                    "infrastructure.external_secrets_chart_version", "0.0.*"
                 ),
             }
 
@@ -1528,7 +1543,7 @@ echo ""
 echo "--- Phase 3: Namespaces ---"
 
 APP_NS=$(grep -A2 'namespaces:' "$PATTERN_DIR/values-hub.yaml" 2>/dev/null | grep '^\s*-' | sed 's/^\s*-\s*//' | sed 's/:.*//' | tr -d ' ' || echo "")
-EXPECTED_NS="vault golang-external-secrets $APP_NS"
+EXPECTED_NS="vault external-secrets $APP_NS"
 for ns in $EXPECTED_NS; do
     if [ -z "$ns" ]; then continue; fi
     if oc get namespace "$ns" &>/dev/null; then
@@ -1602,7 +1617,7 @@ else
     warn "Vault pods not running yet"
 fi
 
-if oc get pods -n golang-external-secrets --no-headers 2>/dev/null | grep -q "Running"; then
+if oc get pods -n external-secrets --no-headers 2>/dev/null | grep -q "Running"; then
     pass "External Secrets Operator pods running"
 else
     warn "External Secrets Operator pods not running yet"
@@ -1716,7 +1731,7 @@ oc delete datasciencecluster --all -A 2>/dev/null || true
 echo ""
 echo "Deleting application namespaces..."
 APP_NS=$(grep -A2 'namespaces:' "$PATTERN_DIR/values-hub.yaml" 2>/dev/null | grep '^\s*-' | sed 's/^\s*-\s*//' | sed 's/:.*//' | tr -d ' ' || echo "")
-for ns in vault golang-external-secrets $APP_NS; do
+for ns in vault external-secrets $APP_NS; do
     if [ -z "$ns" ]; then continue; fi
     if oc get namespace "$ns" &>/dev/null; then
         oc delete namespace "$ns" --wait=false 2>/dev/null || true
@@ -1790,7 +1805,7 @@ oc get pods -n openshift-marketplace --no-headers 2>/dev/null | awk '{printf "  
 echo ""
 echo "--- Application Pods ---"
 APP_NS=$(grep -A2 'namespaces:' "$PATTERN_DIR/values-hub.yaml" 2>/dev/null | grep '^\s*-' | sed 's/^\s*-\s*//' | sed 's/:.*//' | tr -d ' ' || echo "")
-for ns in vault golang-external-secrets $APP_NS; do
+for ns in vault external-secrets $APP_NS; do
     if [ -z "$ns" ]; then continue; fi
     if ! oc get namespace "$ns" &>/dev/null 2>&1; then continue; fi
     PODS=$(oc get pods -n "$ns" --no-headers 2>/dev/null || echo "")
