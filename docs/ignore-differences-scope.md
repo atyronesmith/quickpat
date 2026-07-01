@@ -13,7 +13,7 @@ between quickpat output and a deployable VP.
 ## Goal
 
 Given a quickstart's Helm templates, automatically produce the `ignoreDifferences`
-block for each application in `values-hub.yaml`.
+block for each application in `values-prod.yaml`.
 
 ## Approach
 
@@ -172,7 +172,7 @@ For CRDs not in the static table:
 
 #### Step 4: Integration into Generator
 
-In `generator.py`, when writing the application entry in `values-hub.yaml`, append
+In `generator.py`, when writing the application entry in `values-prod.yaml`, append
 `ignoreDifferences` if the app's chart templates contain CRDs that need it.
 
 ```yaml

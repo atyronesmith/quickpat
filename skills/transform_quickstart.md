@@ -106,7 +106,7 @@ A valid pattern produces exactly these files:
 ```
 <pattern-name>/
   values-global.yaml          # Global config + multisource settings
-  values-hub.yaml             # Hub cluster: namespaces, operators, apps
+  values-prod.yaml             # Cluster group: namespaces, operators, apps
   values-secret.yaml.template # Vault secret definitions (v2.0 format)
   Makefile                    # Just: include Makefile-common
   Makefile-common             # Ansible-based targets (rhvp.cluster_utils)
@@ -150,7 +150,7 @@ main:
     clusterGroupChartVersion: "0.9.*"
 ```
 
-### values-hub.yaml
+### values-prod.yaml
 
 ```yaml
 clusterGroup:
@@ -304,13 +304,13 @@ After generating a pattern, the validator runs deterministic structural checks a
 - [ ] `values-global.yaml`: `main:` is at root level (sibling of `global:`, not nested)
 - [ ] `values-global.yaml`: `multiSourceConfig.enabled: true`
 - [ ] `values-global.yaml`: `clusterGroupChartVersion` present in multiSourceConfig
-- [ ] `values-hub.yaml`: vault + golang-external-secrets apps present (if vault enabled)
-- [ ] `values-hub.yaml`: Infrastructure apps use `chart:` + `chartVersion:` (not `path:`)
-- [ ] `values-hub.yaml`: Application apps use `path: charts/all/<name>` (local) or `repoURL:` (external)
-- [ ] `values-hub.yaml`: `sharedValueFiles` references overrides template
-- [ ] `values-hub.yaml`: Operators with dedicated namespaces have `operatorGroup: true` where needed
-- [ ] `values-hub.yaml`: `projects: [hub]` (list format)
-- [ ] `values-hub.yaml`: `subscriptions:` is a dict (not a list)
+- [ ] `values-prod.yaml`: vault + golang-external-secrets apps present (if vault enabled)
+- [ ] `values-prod.yaml`: Infrastructure apps use `chart:` + `chartVersion:` (not `path:`)
+- [ ] `values-prod.yaml`: Application apps use `path: charts/all/<name>` (local) or `repoURL:` (external)
+- [ ] `values-prod.yaml`: `sharedValueFiles` references overrides template
+- [ ] `values-prod.yaml`: Operators with dedicated namespaces have `operatorGroup: true` where needed
+- [ ] `values-prod.yaml`: `projects: [prod]` (list format)
+- [ ] `values-prod.yaml`: `subscriptions:` is a dict (not a list)
 - [ ] `values-secret.yaml.template`: Has `version: "2.0"`
 - [ ] `values-secret.yaml.template`: Uses `vaultPrefixes:` (plural, list) — NOT `vaultPrefixOverride`
 - [ ] `Makefile`: Contains only `include Makefile-common`

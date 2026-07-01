@@ -9,7 +9,7 @@ QuickPat converts Red Hat AI Quickstarts into Validated Patterns — GitOps-driv
 - **CLI entry point:** `quickpat/cli.py` — 7 subcommands (`list`, `analyze`, `create`, `new`, `batch`, `check-ready`, `validate`)
 - **Pipeline:** `quickpat/pipeline.py` orchestrates analyze → detect → generate → validate
 - **Analyzer:** `quickpat/analyzer.py` — parses Helm charts, detects operators/secrets/GPU/features
-- **Generator:** `quickpat/generator.py` — emits VP directory structure (values-global, values-hub, Makefile, etc.)
+- **Generator:** `quickpat/generator.py` — emits VP directory structure (values-global, values-prod, Makefile, etc.)
 - **Validator:** `quickpat/validator.py` — structural checks + auto-fix loop
 - **LLM providers:** `quickpat/providers/` — Protocol-based classes for OpenAI, Anthropic, Ollama, vLLM, DeepInfra. All optional; deterministic mode works without any LLM.
 - **Config:** `quickpat/config.py` — YAML config with deep-merge defaults. API keys come from environment variables, never config files.

@@ -272,7 +272,7 @@ When running `quickpat create` without `--non-interactive`, the guided questionn
 ```
 my-pattern/
 ├── values-global.yaml              # Global config, multisource settings
-├── values-hub.yaml                 # Hub cluster: namespaces, operators, apps
+├── values-prod.yaml                # Cluster group: namespaces, operators, apps
 ├── values-secret.yaml.template     # Vault secrets template (v2.0 format)
 ├── Makefile
 ├── Makefile-common
@@ -282,8 +282,7 @@ my-pattern/
 ├── .ansible-lint
 ├── .gitignore
 ├── charts/
-│   └── all/
-│       └── <app-name>/             # Local copy of the Helm chart(s)
+│   └── <app-name>-secrets/         # ExternalSecret CRDs (bridges Vault → K8s Secrets)
 ├── overrides/
 │   ├── values-AWS.yaml
 │   ├── values-Azure.yaml
@@ -363,7 +362,7 @@ llm:
 
 pattern:
   output_dir: ~/patterns
-  chart_strategy: local
+  chart_strategy: remote
   clustergroup_version: "0.9.*"
 
 registry:
@@ -408,12 +407,16 @@ quickpat/
 │   └── config.py       # Config loader (YAML + defaults)
 ├── skills/
 │   └── transform_quickstart.md   # Text skill for any LLM
-├── tests/              # 348 tests
+├── tests/              # 347 tests
 ├── examples/
 │   └── sample-spec.yaml
 ├── docs/
+│   ├── decision-points.md
+│   ├── ignore-differences-scope.md
+│   ├── orchestration-plan.md
 │   ├── plan.md
 │   ├── pub-integration-plan.md
+│   ├── refactor-plan.md
 │   └── shared-charts-analysis.md
 ├── pyproject.toml
 ├── quickpat.sh         # Wrapper: uv run quickpat
