@@ -69,31 +69,47 @@ jobs:
           echo "status=$STATUS" >> "$GITHUB_OUTPUT"
           echo "$STATUS" > "$PATTERN_DIR/helm-lint-status.txt"
 
-      - name: Helm template (pattern-secrets)
+      - name: Helm template (secrets chart)
         run: |
-          SECRETS_CHART="/tmp/${{ matrix.quickstart }}-pattern/charts/pattern-secrets"
-          if [ -d "$SECRETS_CHART" ]; then
-            helm template test "$SECRETS_CHART" \
+          PATTERN_DIR="/tmp/${{ matrix.quickstart }}-pattern"
+          FOUND=false
+          for chart_dir in "$PATTERN_DIR"/charts/*-secrets/; do
+            [ -f "$chart_dir/Chart.yaml" ] || continue
+            echo "Rendering: $chart_dir"
+            helm template test "$chart_dir" \
               --set global.pattern="test" \
               --set global.namespace="default" 2>&1
-            echo "pattern-secrets chart renders OK"
-          else
-            echo "No pattern-secrets chart (local strategy) — skipping"
+            echo "$(basename "$chart_dir") chart renders OK"
+            FOUND=true
+          done
+          if [ "$FOUND" = "false" ]; then
+            echo "No secrets chart (local strategy) — skipping"
           fi
 
       - name: Helm template (upstream chart)
         run: |
           PATTERN_DIR="/tmp/${{ matrix.quickstart }}-pattern"
-          VALUES_HUB="$PATTERN_DIR/values-hub.yaml"
+          INFRA_APPS="vault openshift-external-secrets golang-external-secrets dsc nfd nvidia-config"
 
-          # Extract repoURL and path from values-hub.yaml for the main app
+          # Find the values-{group}.yaml file (prod or hub)
+          VALUES_FILE=""
+          for f in "$PATTERN_DIR"/values-prod.yaml "$PATTERN_DIR"/values-hub.yaml; do
+            if [ -f "$f" ]; then VALUES_FILE="$f"; break; fi
+          done
+          if [ -z "$VALUES_FILE" ]; then
+            echo "No values-prod.yaml or values-hub.yaml found — skipping"
+            exit 0
+          fi
+
+          # Extract repoURL and path, skipping infra and secrets apps
           REPO_URL=$(python3 -c "
           import yaml
-          with open('$VALUES_HUB') as f:
+          with open('$VALUES_FILE') as f:
               data = yaml.safe_load(f)
+          infra = set('$INFRA_APPS'.split())
           apps = data.get('clusterGroup', {}).get('applications', {})
           for name, app in apps.items():
-              if name in ('vault', 'openshift-external-secrets', 'golang-external-secrets', 'pattern-secrets', 'dsc', 'nfd', 'nvidia-config'):
+              if name in infra or name.endswith('-secrets'):
                   continue
               url = app.get('repoURL', '')
               if url:
@@ -103,11 +119,12 @@ jobs:
 
           CHART_PATH=$(python3 -c "
           import yaml
-          with open('$VALUES_HUB') as f:
+          with open('$VALUES_FILE') as f:
               data = yaml.safe_load(f)
+          infra = set('$INFRA_APPS'.split())
           apps = data.get('clusterGroup', {}).get('applications', {})
           for name, app in apps.items():
-              if name in ('vault', 'openshift-external-secrets', 'golang-external-secrets', 'pattern-secrets', 'dsc', 'nfd', 'nvidia-config'):
+              if name in infra or name.endswith('-secrets'):
                   continue
               path = app.get('path', '.')
               if path:
