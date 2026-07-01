@@ -615,13 +615,18 @@ class TestRemoteStrategyGeneration:
 
 
 class TestScriptsGeneration:
-    def test_scripts_directory_created(self, single_chart_quickstart, tmp_path):
+    def test_scripts_not_generated_by_default(self, single_chart_quickstart, tmp_path):
         out, _, _ = _generate(single_chart_quickstart, tmp_path)
+        from pathlib import Path
+        assert not (Path(out) / "scripts").exists()
+
+    def test_scripts_directory_created(self, single_chart_quickstart, tmp_path):
+        out, _, _ = _generate(single_chart_quickstart, tmp_path, generate_crc_scripts=True)
         from pathlib import Path
         assert (Path(out) / "scripts").is_dir()
 
     def test_all_scripts_present(self, single_chart_quickstart, tmp_path):
-        out, _, _ = _generate(single_chart_quickstart, tmp_path)
+        out, _, _ = _generate(single_chart_quickstart, tmp_path, generate_crc_scripts=True)
         from pathlib import Path
         scripts = Path(out) / "scripts"
         for name in ("crc-setup.sh", "deploy.sh", "validate-deployment.sh",
@@ -629,7 +634,7 @@ class TestScriptsGeneration:
             assert (scripts / name).exists(), f"Missing {name}"
 
     def test_scripts_executable(self, single_chart_quickstart, tmp_path):
-        out, _, _ = _generate(single_chart_quickstart, tmp_path)
+        out, _, _ = _generate(single_chart_quickstart, tmp_path, generate_crc_scripts=True)
         from pathlib import Path
         import stat
         for name in ("crc-setup.sh", "deploy.sh", "validate-deployment.sh",
@@ -638,7 +643,7 @@ class TestScriptsGeneration:
             assert p.stat().st_mode & stat.S_IXUSR, f"{name} not executable"
 
     def test_dsc_yaml_created(self, single_chart_quickstart, tmp_path):
-        out, _, _ = _generate(single_chart_quickstart, tmp_path)
+        out, _, _ = _generate(single_chart_quickstart, tmp_path, generate_crc_scripts=True)
         from pathlib import Path
         dsc = Path(out) / "scripts" / "dsc.yaml"
         assert dsc.exists()
@@ -647,14 +652,14 @@ class TestScriptsGeneration:
         assert data["kind"] == "DataScienceCluster"
 
     def test_readme_created(self, single_chart_quickstart, tmp_path):
-        out, _, _ = _generate(single_chart_quickstart, tmp_path)
+        out, _, _ = _generate(single_chart_quickstart, tmp_path, generate_crc_scripts=True)
         from pathlib import Path
         readme = Path(out) / "scripts" / "README.md"
         assert readme.exists()
         assert "CRC" in readme.read_text()
 
     def test_deploy_script_uses_eo_pipefail(self, single_chart_quickstart, tmp_path):
-        out, _, _ = _generate(single_chart_quickstart, tmp_path)
+        out, _, _ = _generate(single_chart_quickstart, tmp_path, generate_crc_scripts=True)
         from pathlib import Path
         deploy = (Path(out) / "scripts" / "deploy.sh").read_text()
         assert "set -eo pipefail" in deploy

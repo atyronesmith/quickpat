@@ -66,6 +66,10 @@ def main():
         '--non-interactive', action='store_true',
         help='Use defaults, skip interactive prompts',
     )
+    create_p.add_argument(
+        '--crc-scripts', action='store_true',
+        help='Generate CRC deployment/validation scripts',
+    )
     _add_llm_args(create_p)
     _add_transform_args(create_p)
 
@@ -282,6 +286,7 @@ def cmd_create(args):
             "base_url": getattr(args, "llm_url", None),
         })
         config = build_default_config(analysis, args, path)
+        crc = getattr(args, 'crc_scripts', False)
 
         if config['chart_strategy'] == 'remote':
             result = transform_remote(
@@ -289,6 +294,7 @@ def cmd_create(args):
                 output_dir=config['output_dir'],
                 pattern_name=config['pattern_name'],
                 llm=llm,
+                extra_config={'generate_crc_scripts': crc},
             )
         else:
             tx_rules = None
@@ -301,8 +307,9 @@ def cmd_create(args):
                 llm=llm,
                 use_vault=config['use_vault'],
                 chart_strategy=config['chart_strategy'],
-                extra_config={k: v for k, v in config.items()
-                              if k in ('tier',)},
+                extra_config={
+                    k: v for k, v in config.items() if k in ('tier',)
+                } | {'generate_crc_scripts': crc},
                 enable_transform=getattr(args, 'transform', False),
                 transform_rules=tx_rules,
             )

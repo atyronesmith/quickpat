@@ -35,7 +35,8 @@ class PatternGenerator:
         self._generate_gitignore()
         self._generate_overrides()
         self._generate_infra_charts()
-        self._generate_scripts()
+        if self.config.get('generate_crc_scripts', False):
+            self._generate_scripts()
         self._generate_readme()
         self._generate_report()
         self._generate_license()
@@ -69,7 +70,7 @@ class PatternGenerator:
             },
             'main': {
                 'clusterGroupName': self.config.get(
-                    'cluster_group_name', 'hub'
+                    'cluster_group_name', 'prod'
                 ),
                 'multiSourceConfig': {
                     'enabled': True,
@@ -952,19 +953,16 @@ podman run -it --rm --pull=newer \
         # Deploy
         lines.append('## Deploy')
         lines.append('')
-        lines.append('### On CRC or OpenShift')
-        lines.append('')
         lines.append('```bash')
-        lines.append('./scripts/deploy.sh')
-        lines.append('```')
-        lines.append('')
-        lines.append('### Via pattern.sh (standard VP flow)')
-        lines.append('')
-        lines.append('```bash')
-        lines.append('git init && git add -A && git commit -m "init"')
+        lines.append('# Clone and deploy')
         lines.append('oc login <cluster>')
         lines.append('./pattern.sh make install')
         lines.append('```')
+        lines.append('')
+        lines.append(
+            'The pattern must be on a git remote accessible by the cluster. '
+            'If starting from a local copy, push it to a git repo first.'
+        )
         lines.append('')
 
         # Directory structure
@@ -980,7 +978,8 @@ podman run -it --rm --pull=newer \
         lines.append('pattern.sh                  # VP utility container runner')
         lines.append('charts/                     # Helm chart(s)')
         lines.append('overrides/                  # Platform-specific value overrides')
-        lines.append('scripts/                    # CRC deploy, undeploy, validate, status')
+        if self.config.get('generate_crc_scripts', False):
+            lines.append('scripts/                    # CRC deploy, undeploy, validate, status')
         lines.append('docs/                       # Quickstart analysis report')
         lines.append('```')
         lines.append('')

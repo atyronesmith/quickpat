@@ -289,14 +289,9 @@ my-pattern/
 │   ├── values-GCP.yaml
 │   ├── values-IBMCloud.yaml
 │   └── values-None.yaml
-├── scripts/
-│   ├── crc-setup.sh                # CRC cluster setup (32GB, 12 CPU)
-│   ├── deploy.sh                   # Deploy pattern to CRC/OpenShift
-│   ├── undeploy.sh                 # Clean removal of pattern
-│   ├── validate-deployment.sh      # Post-deploy validation checks
-│   ├── status.sh                   # Cluster status report
-│   ├── dsc.yaml                    # DataScienceCluster CR for OpenShift AI
-│   └── README.md                   # Script documentation
+├── scripts/                        # Only with --crc-scripts
+│   ├── crc-setup.sh, deploy.sh, undeploy.sh, validate-deployment.sh, status.sh
+│   └── dsc.yaml
 └── docs/
     └── quickstart-analysis.md
 ```
@@ -407,7 +402,7 @@ quickpat/
 │   └── config.py       # Config loader (YAML + defaults)
 ├── skills/
 │   └── transform_quickstart.md   # Text skill for any LLM
-├── tests/              # 347 tests
+├── tests/              # 348 tests
 ├── examples/
 │   └── sample-spec.yaml
 ├── docs/
