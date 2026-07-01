@@ -75,11 +75,11 @@ def _make_full_profile():
         override_entries=[
             OverrideEntry(
                 path="pgvector.secret.create", value=False,
-                reason="Secrets managed by pattern-secrets chart",
+                reason="Secrets managed by secrets chart",
             ),
             OverrideEntry(
                 path="llm-service.secret.enabled", value=False,
-                reason="Secrets managed by pattern-secrets chart",
+                reason="Secrets managed by secrets chart",
             ),
         ],
         infra_decisions=[

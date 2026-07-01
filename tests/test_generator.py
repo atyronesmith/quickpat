@@ -33,7 +33,7 @@ class TestSingleChartGeneration:
         from pathlib import Path
         p = Path(out)
         assert (p / "values-global.yaml").exists()
-        assert (p / "values-hub.yaml").exists()
+        assert (p / "values-prod.yaml").exists()
         assert (p / "Makefile").exists()
         assert (p / "Makefile-common").exists()
         assert (p / "pattern.sh").exists()
@@ -58,7 +58,7 @@ class TestSingleChartGeneration:
     def test_values_hub_has_application(self, single_chart_quickstart, tmp_path):
         out, _, _ = _generate(single_chart_quickstart, tmp_path)
         from pathlib import Path
-        with open(Path(out) / "values-hub.yaml") as f:
+        with open(Path(out) / "values-prod.yaml") as f:
             data = yaml.safe_load(f)
         apps = data["clusterGroup"]["applications"]
         assert "myapp" in apps
@@ -84,7 +84,7 @@ class TestMultiChartGeneration:
     def test_creates_all_applications(self, multi_chart_quickstart, tmp_path):
         out, _, _ = _generate(multi_chart_quickstart, tmp_path)
         from pathlib import Path
-        with open(Path(out) / "values-hub.yaml") as f:
+        with open(Path(out) / "values-prod.yaml") as f:
             data = yaml.safe_load(f)
         apps = data["clusterGroup"]["applications"]
         assert "app" in apps
@@ -102,7 +102,7 @@ class TestMultiChartGeneration:
     def test_oai_labels_only_on_inference_namespace(self, multi_chart_quickstart, tmp_path):
         out, _, _ = _generate(multi_chart_quickstart, tmp_path)
         from pathlib import Path
-        with open(Path(out) / "values-hub.yaml") as f:
+        with open(Path(out) / "values-prod.yaml") as f:
             data = yaml.safe_load(f)
         namespaces = data["clusterGroup"]["namespaces"]
         # Find which namespaces have opendatahub labels
@@ -122,7 +122,7 @@ class TestGroupedNamespaces:
     def test_grouped_charts_share_namespace(self, grouped_chart_quickstart, tmp_path):
         out, _, _ = _generate(grouped_chart_quickstart, tmp_path)
         from pathlib import Path
-        with open(Path(out) / "values-hub.yaml") as f:
+        with open(Path(out) / "values-prod.yaml") as f:
             data = yaml.safe_load(f)
         apps = data["clusterGroup"]["applications"]
         # collector and tempo share "observability" namespace
@@ -136,7 +136,7 @@ class TestGroupedNamespaces:
     def test_grouped_namespace_appears_once(self, grouped_chart_quickstart, tmp_path):
         out, _, _ = _generate(grouped_chart_quickstart, tmp_path)
         from pathlib import Path
-        with open(Path(out) / "values-hub.yaml") as f:
+        with open(Path(out) / "values-prod.yaml") as f:
             data = yaml.safe_load(f)
         namespaces = data["clusterGroup"]["namespaces"]
         ns_names = []
@@ -150,7 +150,7 @@ class TestGroupedNamespaces:
         """If any chart in a group needs OAI labels, the namespace gets them."""
         out, _, _ = _generate(grouped_chart_quickstart, tmp_path)
         from pathlib import Path
-        with open(Path(out) / "values-hub.yaml") as f:
+        with open(Path(out) / "values-prod.yaml") as f:
             data = yaml.safe_load(f)
         namespaces = data["clusterGroup"]["namespaces"]
         # The "inference" namespace should have OAI labels (model has llm-service dep)
@@ -213,13 +213,13 @@ class TestNewConfigKeys:
 
     def test_configurable_cluster_group_name(self, single_chart_quickstart, tmp_path):
         out, _, _ = _generate(single_chart_quickstart, tmp_path,
-                              cluster_group_name="prod")
+                              cluster_group_name="factory")
         from pathlib import Path
         with open(Path(out) / "values-global.yaml") as f:
             data = yaml.safe_load(f)
-        assert data["main"]["clusterGroupName"] == "prod"
-        assert (Path(out) / "values-prod.yaml").exists()
-        assert not (Path(out) / "values-hub.yaml").exists()
+        assert data["main"]["clusterGroupName"] == "factory"
+        assert (Path(out) / "values-factory.yaml").exists()
+        assert not (Path(out) / "values-prod.yaml").exists()
 
     def test_secret_config_skip(self, single_chart_quickstart, tmp_path):
         out, _, _ = _generate(single_chart_quickstart, tmp_path,
@@ -245,7 +245,7 @@ class TestNewConfigKeys:
         out, _, _ = _generate(multi_chart_quickstart, tmp_path,
                               namespace_overrides={"db": "data-tier"})
         from pathlib import Path
-        with open(Path(out) / "values-hub.yaml") as f:
+        with open(Path(out) / "values-prod.yaml") as f:
             data = yaml.safe_load(f)
         apps = data["clusterGroup"]["applications"]
         assert apps["db"]["namespace"] == "data-tier"
@@ -273,7 +273,7 @@ class TestNewConfigKeys:
         from quickpat.generator import PatternGenerator
         PatternGenerator(analysis, config).generate()
         from pathlib import Path
-        with open(Path(out) / "values-hub.yaml") as f:
+        with open(Path(out) / "values-prod.yaml") as f:
             data = yaml.safe_load(f)
         apps = data["clusterGroup"]["applications"]
         assert apps["local-app"]["path"] == "charts/all/local-app"
@@ -299,7 +299,7 @@ class TestVaultDisabled:
         write_values(chart, {"replicas": 3})
         out, _, _ = _generate(qs, tmp_path / "out", use_vault=False)
         from pathlib import Path
-        with open(Path(out) / "values-hub.yaml") as f:
+        with open(Path(out) / "values-prod.yaml") as f:
             data = yaml.safe_load(f)
         apps = data["clusterGroup"]["applications"]
         assert "vault" not in apps
@@ -415,7 +415,7 @@ class TestRemoteStrategyGeneration:
     def test_app_has_repo_url_and_path(self, tmp_path):
         out, _, _ = _remote_config(tmp_path)
         from pathlib import Path
-        with open(Path(out) / "values-hub.yaml") as f:
+        with open(Path(out) / "values-prod.yaml") as f:
             data = yaml.safe_load(f)
         app = data["clusterGroup"]["applications"]["rag-quickstart"]
         assert app["repoURL"] == "https://github.com/rh-ai-quickstart/RAG"
@@ -426,7 +426,7 @@ class TestRemoteStrategyGeneration:
     def test_app_has_extra_value_files(self, tmp_path):
         out, _, _ = _remote_config(tmp_path)
         from pathlib import Path
-        with open(Path(out) / "values-hub.yaml") as f:
+        with open(Path(out) / "values-prod.yaml") as f:
             data = yaml.safe_load(f)
         app = data["clusterGroup"]["applications"]["rag-quickstart"]
         assert app["extraValueFiles"] == ["/overrides/rag-quickstart.yaml"]
@@ -434,42 +434,42 @@ class TestRemoteStrategyGeneration:
     def test_app_has_ignore_differences(self, tmp_path):
         out, _, _ = _remote_config(tmp_path)
         from pathlib import Path
-        with open(Path(out) / "values-hub.yaml") as f:
+        with open(Path(out) / "values-prod.yaml") as f:
             data = yaml.safe_load(f)
         app = data["clusterGroup"]["applications"]["rag-quickstart"]
         assert len(app["ignoreDifferences"]) == 1
         assert app["ignoreDifferences"][0]["kind"] == "Route"
 
-    def test_pattern_secrets_app_created(self, tmp_path):
+    def test_secrets_app_created(self, tmp_path):
         out, _, _ = _remote_config(tmp_path)
         from pathlib import Path
-        with open(Path(out) / "values-hub.yaml") as f:
+        with open(Path(out) / "values-prod.yaml") as f:
             data = yaml.safe_load(f)
         apps = data["clusterGroup"]["applications"]
-        assert "pattern-secrets" in apps
-        assert apps["pattern-secrets"]["path"] == "charts/pattern-secrets"
-        assert apps["pattern-secrets"]["namespace"] == "rag"
+        assert "rag-quickstart-secrets" in apps
+        assert apps["rag-quickstart-secrets"]["path"] == "charts/rag-quickstart-secrets"
+        assert apps["rag-quickstart-secrets"]["namespace"] == "rag"
 
-    def test_pattern_secrets_chart_exists(self, tmp_path):
+    def test_secrets_chart_exists(self, tmp_path):
         out, _, _ = _remote_config(tmp_path)
         from pathlib import Path
-        chart_dir = Path(out) / "charts" / "pattern-secrets"
+        chart_dir = Path(out) / "charts" / "rag-quickstart-secrets"
         assert (chart_dir / "Chart.yaml").exists()
         with open(chart_dir / "Chart.yaml") as f:
             data = yaml.safe_load(f)
-        assert data["name"] == "pattern-secrets"
+        assert data["name"] == "rag-quickstart-secrets"
 
     def test_external_secret_crds_created(self, tmp_path):
         out, _, _ = _remote_config(tmp_path)
         from pathlib import Path
-        tmpl_dir = Path(out) / "charts" / "pattern-secrets" / "templates"
+        tmpl_dir = Path(out) / "charts" / "rag-quickstart-secrets" / "templates"
         assert (tmpl_dir / "pgvector-secret.yaml").exists()
         assert (tmpl_dir / "llm-service-secret.yaml").exists()
 
     def test_external_secret_uses_v1(self, tmp_path):
         out, _, _ = _remote_config(tmp_path)
         from pathlib import Path
-        with open(Path(out) / "charts" / "pattern-secrets" / "templates" / "pgvector-secret.yaml") as f:
+        with open(Path(out) / "charts" / "rag-quickstart-secrets" / "templates" / "pgvector-secret.yaml") as f:
             data = yaml.safe_load(f)
         assert data["apiVersion"] == "external-secrets.io/v1"
         assert data["kind"] == "ExternalSecret"
@@ -477,12 +477,12 @@ class TestRemoteStrategyGeneration:
     def test_external_secret_target_name_matches_subchart(self, tmp_path):
         out, _, _ = _remote_config(tmp_path)
         from pathlib import Path
-        with open(Path(out) / "charts" / "pattern-secrets" / "templates" / "pgvector-secret.yaml") as f:
+        with open(Path(out) / "charts" / "rag-quickstart-secrets" / "templates" / "pgvector-secret.yaml") as f:
             data = yaml.safe_load(f)
         assert data["metadata"]["name"] == "pgvector"
         assert data["spec"]["target"]["name"] == "pgvector"
 
-        with open(Path(out) / "charts" / "pattern-secrets" / "templates" / "llm-service-secret.yaml") as f:
+        with open(Path(out) / "charts" / "rag-quickstart-secrets" / "templates" / "llm-service-secret.yaml") as f:
             data = yaml.safe_load(f)
         assert data["metadata"]["name"] == "huggingface-secret"
         assert data["spec"]["target"]["name"] == "huggingface-secret"
@@ -490,7 +490,7 @@ class TestRemoteStrategyGeneration:
     def test_external_secret_per_key_data(self, tmp_path):
         out, _, _ = _remote_config(tmp_path)
         from pathlib import Path
-        with open(Path(out) / "charts" / "pattern-secrets" / "templates" / "pgvector-secret.yaml") as f:
+        with open(Path(out) / "charts" / "rag-quickstart-secrets" / "templates" / "pgvector-secret.yaml") as f:
             data = yaml.safe_load(f)
         spec_data = data["spec"]["data"]
         keys = [d["secretKey"] for d in spec_data]
@@ -503,7 +503,7 @@ class TestRemoteStrategyGeneration:
     def test_external_secret_computed_field_in_template(self, tmp_path):
         out, _, _ = _remote_config(tmp_path)
         from pathlib import Path
-        with open(Path(out) / "charts" / "pattern-secrets" / "templates" / "pgvector-secret.yaml") as f:
+        with open(Path(out) / "charts" / "rag-quickstart-secrets" / "templates" / "pgvector-secret.yaml") as f:
             data = yaml.safe_load(f)
         tmpl_data = data["spec"]["target"]["template"]["data"]
         assert "jdbc-uri" in tmpl_data
@@ -567,18 +567,18 @@ class TestRemoteStrategyGeneration:
         from pathlib import Path
         assert not (Path(out) / "charts" / "all").exists()
 
-    def test_no_pattern_secrets_without_vault(self, tmp_path):
+    def test_no_secrets_chart_without_vault(self, tmp_path):
         out, _, _ = _remote_config(tmp_path, use_vault=False)
         from pathlib import Path
-        with open(Path(out) / "values-hub.yaml") as f:
+        with open(Path(out) / "values-prod.yaml") as f:
             data = yaml.safe_load(f)
-        assert "pattern-secrets" not in data["clusterGroup"]["applications"]
-        assert not (Path(out) / "charts" / "pattern-secrets").exists()
+        assert "rag-quickstart-secrets" not in data["clusterGroup"]["applications"]
+        assert not (Path(out) / "charts" / "rag-quickstart-secrets").exists()
 
     def test_computed_fields_not_in_spec_data(self, tmp_path):
         out, _, _ = _remote_config(tmp_path)
         from pathlib import Path
-        with open(Path(out) / "charts" / "pattern-secrets" / "templates" / "pgvector-secret.yaml") as f:
+        with open(Path(out) / "charts" / "rag-quickstart-secrets" / "templates" / "pgvector-secret.yaml") as f:
             data = yaml.safe_load(f)
         keys = [d["secretKey"] for d in data["spec"]["data"]]
         assert "jdbc-uri" not in keys
@@ -586,7 +586,7 @@ class TestRemoteStrategyGeneration:
     def test_no_duplicate_data_entries(self, tmp_path):
         out, _, _ = _remote_config(tmp_path)
         from pathlib import Path
-        with open(Path(out) / "charts" / "pattern-secrets" / "templates" / "pgvector-secret.yaml") as f:
+        with open(Path(out) / "charts" / "rag-quickstart-secrets" / "templates" / "pgvector-secret.yaml") as f:
             data = yaml.safe_load(f)
         keys = [d["secretKey"] for d in data["spec"]["data"]]
         assert len(keys) == len(set(keys))
@@ -605,7 +605,7 @@ class TestRemoteStrategyGeneration:
         }
         out, _, _ = _remote_config(tmp_path, **config_overrides)
         from pathlib import Path
-        with open(Path(out) / "charts" / "pattern-secrets" / "templates" / "pgvector-secret.yaml") as f:
+        with open(Path(out) / "charts" / "rag-quickstart-secrets" / "templates" / "pgvector-secret.yaml") as f:
             data = yaml.safe_load(f)
         tmpl = data["spec"]["target"]["template"]["data"]["jdbc-uri"]
         assert ".Values." not in tmpl
@@ -672,7 +672,7 @@ class TestRemotePathFallback:
         """Remote strategy with empty chart_path_in_repo should use '.' not ''."""
         out, _, _ = _remote_config(tmp_path, chart_path_in_repo="")
         from pathlib import Path
-        with open(Path(out) / "values-hub.yaml") as f:
+        with open(Path(out) / "values-prod.yaml") as f:
             data = yaml.safe_load(f)
         app = data["clusterGroup"]["applications"]["rag-quickstart"]
         assert app["path"] == "."
@@ -680,7 +680,7 @@ class TestRemotePathFallback:
     def test_explicit_path_preserved(self, tmp_path):
         out, _, _ = _remote_config(tmp_path, chart_path_in_repo="deploy/helm/rag")
         from pathlib import Path
-        with open(Path(out) / "values-hub.yaml") as f:
+        with open(Path(out) / "values-prod.yaml") as f:
             data = yaml.safe_load(f)
         app = data["clusterGroup"]["applications"]["rag-quickstart"]
         assert app["path"] == "deploy/helm/rag"

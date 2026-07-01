@@ -20,7 +20,7 @@ DEFAULTS = {
     },
     "pattern": {
         "output_dir": "~/patterns",
-        "chart_strategy": "local",
+        "chart_strategy": "remote",
         "clustergroup_version": "0.9.*",
         "default_vault_prefix": "hub",
         "subchart_cache_dir": "~/.cache/quickpat/charts",

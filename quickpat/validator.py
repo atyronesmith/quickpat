@@ -98,28 +98,29 @@ def validate_and_fix(
 # ── Deterministic checks ────────────────────────────────────────────
 
 
-def _find_values_hub_file(out: Path) -> str:
+def _find_values_group_file(out: Path) -> str:
     """Find the values-{clusterGroupName}.yaml file."""
-    if (out / "values-hub.yaml").exists():
-        return "values-hub.yaml"
     global_path = out / "values-global.yaml"
     if global_path.exists():
         data = _load_yaml(global_path)
         if data:
-            group_name = (data.get("main") or {}).get("clusterGroupName", "hub")
+            group_name = (data.get("main") or {}).get("clusterGroupName", "prod")
             candidate = f"values-{group_name}.yaml"
             if (out / candidate).exists():
                 return candidate
+    for name in ("values-prod.yaml", "values-hub.yaml"):
+        if (out / name).exists():
+            return name
     for p in out.glob("values-*.yaml"):
         name = p.name
         if name not in ("values-global.yaml", "values-secret.yaml.template"):
             return name
-    return "values-hub.yaml"
+    return "values-prod.yaml"
 
 
 def _check_file_structure(out: Path) -> list:
     issues = []
-    values_hub = _find_values_hub_file(out)
+    values_hub = _find_values_group_file(out)
     required = [
         "values-global.yaml",
         values_hub,
@@ -182,7 +183,7 @@ def _check_values_global(out: Path) -> list:
 
 def _check_values_hub(out: Path, config: dict = None) -> list:
     issues = []
-    hub_file = _find_values_hub_file(out)
+    hub_file = _find_values_group_file(out)
     path = out / hub_file
     if not path.exists():
         return issues
@@ -220,7 +221,6 @@ def _check_values_hub(out: Path, config: dict = None) -> list:
                     auto_fixable=True,
                 ))
 
-    valid_path_prefixes = ('charts/all/', 'charts/pattern-secrets', 'charts/')
     for app_name, app in apps.items():
         if app_name in ("vault", "openshift-external-secrets", "golang-external-secrets"):
             continue
@@ -231,15 +231,15 @@ def _check_values_hub(out: Path, config: dict = None) -> list:
                 hub_file, "warning",
                 f"App '{app_name}' has neither path: nor repoURL:/chart:",
             ))
-        if has_path and "repoURL" not in app and not any(app["path"].startswith(p) for p in valid_path_prefixes):
+        if has_path and "repoURL" not in app and not app["path"].startswith("charts/"):
             issues.append(Issue(
                 hub_file, "error",
-                f"App '{app_name}' path should start with charts/all/ or charts/pattern-secrets, got: {app['path']}",
+                f"App '{app_name}' path should start with charts/, got: {app['path']}",
                 auto_fixable=True,
             ))
 
     # Remote strategy checks
-    issues.extend(_check_remote_strategy(out, apps))
+    issues.extend(_check_remote_strategy(out, apps, hub_file))
 
     return issues
 
@@ -383,7 +383,7 @@ def _check_no_legacy(out: Path) -> list:
     return issues
 
 
-def _check_remote_strategy(out: Path, apps: dict) -> list:
+def _check_remote_strategy(out: Path, apps: dict, values_file: str = "values-prod.yaml") -> list:
     """Validate remote-strategy specific requirements."""
     issues = []
 
@@ -396,21 +396,24 @@ def _check_remote_strategy(out: Path, apps: dict) -> list:
     if not remote_apps:
         return issues
 
-    # pattern-secrets chart must exist if declared
-    if "pattern-secrets" in apps:
-        ps_dir = out / "charts" / "pattern-secrets"
+    # Secrets chart (named {app}-secrets) must exist if declared
+    infra_apps = {"vault", "openshift-external-secrets", "golang-external-secrets"}
+    secrets_apps = [name for name in apps if name.endswith("-secrets") and name not in infra_apps]
+    for secrets_app in secrets_apps:
+        app = apps[secrets_app]
+        chart_path = app.get("path", f"charts/{secrets_app}")
+        ps_dir = out / chart_path
         if not ps_dir.is_dir():
             issues.append(Issue(
-                "charts/pattern-secrets/", "error",
-                "pattern-secrets app declared but charts/pattern-secrets/ directory missing",
+                f"{chart_path}/", "error",
+                f"{secrets_app} app declared but {chart_path}/ directory missing",
             ))
         elif not (ps_dir / "Chart.yaml").exists():
             issues.append(Issue(
-                "charts/pattern-secrets/Chart.yaml", "error",
-                "charts/pattern-secrets/ missing Chart.yaml",
+                f"{chart_path}/Chart.yaml", "error",
+                f"{chart_path}/ missing Chart.yaml",
             ))
         else:
-            # Check ExternalSecret templates use v1
             tmpl_dir = ps_dir / "templates"
             if tmpl_dir.is_dir():
                 for tmpl in tmpl_dir.glob("*.yaml"):
@@ -420,7 +423,7 @@ def _check_remote_strategy(out: Path, apps: dict) -> list:
                     api_ver = data.get("apiVersion", "")
                     if "external-secrets.io" in api_ver and api_ver != "external-secrets.io/v1":
                         issues.append(Issue(
-                            f"charts/pattern-secrets/templates/{tmpl.name}", "warning",
+                            f"{chart_path}/templates/{tmpl.name}", "warning",
                             f"ExternalSecret uses {api_ver} — recommend external-secrets.io/v1",
                         ))
 
@@ -429,12 +432,12 @@ def _check_remote_strategy(out: Path, apps: dict) -> list:
         for i, diff in enumerate(app.get("ignoreDifferences", [])):
             if "kind" not in diff:
                 issues.append(Issue(
-                    "values-hub.yaml", "error",
+                    values_file, "error",
                     f"App '{name}' ignoreDifferences[{i}] missing 'kind'",
                 ))
             if "jsonPointers" not in diff:
                 issues.append(Issue(
-                    "values-hub.yaml", "error",
+                    values_file, "error",
                     f"App '{name}' ignoreDifferences[{i}] missing 'jsonPointers'",
                 ))
 
@@ -449,13 +452,13 @@ Validate this Validated Pattern against these rules:
 
 1. values-global.yaml: main: must be a root-level key (sibling of global:, NOT nested under it)
 2. values-global.yaml: multiSourceConfig.enabled must be true
-3. values-hub.yaml: vault + openshift-external-secrets apps must be present if vault is enabled
-4. values-hub.yaml: Infrastructure apps (vault, external-secrets) must use chart: + chartVersion: (NOT path:)
-5. values-hub.yaml: Application apps should use path: charts/all/<name> (local) or repoURL: (external)
-6. values-hub.yaml: sharedValueFiles must reference the overrides template
-7. values-hub.yaml: Operators needing dedicated namespaces must have operatorGroup: true
-8. values-hub.yaml: projects: must be a list (not a string)
-9. values-hub.yaml: subscriptions: must be a dict (not a list)
+3. values-{clusterGroupName}.yaml: vault + openshift-external-secrets apps must be present if vault is enabled
+4. values-{clusterGroupName}.yaml: Infrastructure apps (vault, external-secrets) must use chart: + chartVersion: (NOT path:)
+5. values-{clusterGroupName}.yaml: Application apps should use path: charts/<name> (local) or repoURL: (external)
+6. values-{clusterGroupName}.yaml: sharedValueFiles must reference the overrides template
+7. values-{clusterGroupName}.yaml: Operators needing dedicated namespaces must have operatorGroup: true
+8. values-{clusterGroupName}.yaml: projects: must be a list (not a string)
+9. values-{clusterGroupName}.yaml: subscriptions: must be a dict (not a list)
 10. values-secret.yaml.template: Must have version: "2.0"
 11. values-secret.yaml.template: Must use vaultPrefixes: (plural, list) — NOT vaultPrefixOverride
 12. Makefile: Should contain only "include Makefile-common"
@@ -498,7 +501,8 @@ VALIDATION_REVIEW_SCHEMA = {
 def _llm_review(out: Path, llm: Provider) -> list:
     """Ask the LLM to review generated files against the validation checklist."""
     files_content = []
-    for fname in ("values-global.yaml", "values-hub.yaml", "values-secret.yaml.template", "Makefile"):
+    values_group = _find_values_group_file(out)
+    for fname in ("values-global.yaml", values_group, "values-secret.yaml.template", "Makefile"):
         fpath = out / fname
         if fpath.exists():
             content = fpath.read_text()
@@ -612,14 +616,15 @@ def _try_fix(out: Path, issue: Issue) -> bool:
         (out / "pattern.sh").chmod(0o755)
         return True
 
-    if issue.file == "values-hub.yaml" and "charts/all/" in issue.message:
-        return _fix_chart_path(out / "values-hub.yaml")
+    values_group = _find_values_group_file(out)
+    if issue.file == values_group and "charts/all/" in issue.message:
+        return _fix_chart_path(out / values_group)
 
-    if issue.file == "values-hub.yaml" and "sharedValueFiles" in issue.message:
-        return _fix_shared_value_files(out / "values-hub.yaml")
+    if issue.file == values_group and "sharedValueFiles" in issue.message:
+        return _fix_shared_value_files(out / values_group)
 
-    if issue.file == "values-hub.yaml" and "should use chart:" in issue.message:
-        return _fix_infra_app_chart(out / "values-hub.yaml", issue.message)
+    if issue.file == values_group and "should use chart:" in issue.message:
+        return _fix_infra_app_chart(out / values_group, issue.message)
 
     if "overrides/" in issue.file or "overrides/ directory" in issue.message:
         return _fix_overrides(out, issue)

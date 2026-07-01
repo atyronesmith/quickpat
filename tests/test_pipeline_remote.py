@@ -120,7 +120,7 @@ class TestProfileToConfig:
             override_entries=[
                 OverrideEntry(
                     path="pgvector.secret.create", value=False,
-                    reason="Secrets managed by pattern-secrets chart",
+                    reason="Secrets managed by secrets chart",
                 ),
             ],
             secret_target_names={"pgvector": "pgvector", "llm-service": "huggingface-secret"},
@@ -223,8 +223,8 @@ class TestTransformRemote:
             str(qs), output_dir=out, pattern_name="test-pattern",
         )
         assert result.success is True
-        assert (Path(out) / "values-hub.yaml").exists()
-        assert (Path(out) / "charts" / "pattern-secrets").is_dir()
+        assert (Path(out) / "values-prod.yaml").exists()
+        assert any(d.name.endswith("-secrets") for d in (Path(out) / "charts").iterdir() if d.is_dir())
         assert (Path(out) / ".quickpat" / "profile.yaml").exists()
 
     def test_profile_saved(self, tmp_path):

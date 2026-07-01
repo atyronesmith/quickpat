@@ -16,7 +16,7 @@ def _make_valid_pattern(path):
         yaml.dump({
             "global": {"pattern": "test"},
             "main": {
-                "clusterGroupName": "hub",
+                "clusterGroupName": "prod",
                 "multiSourceConfig": {
                     "enabled": True,
                     "clusterGroupChartVersion": "0.9.*",
@@ -24,15 +24,15 @@ def _make_valid_pattern(path):
             },
         }, f, sort_keys=False)
 
-    # values-hub.yaml
-    with open(path / "values-hub.yaml", "w") as f:
+    # values-prod.yaml
+    with open(path / "values-prod.yaml", "w") as f:
         yaml.dump({
             "clusterGroup": {
-                "name": "hub",
+                "name": "prod",
                 "isHubCluster": True,
                 "namespaces": ["vault"],
                 "subscriptions": {},
-                "projects": ["hub"],
+                "projects": ["prod"],
                 "sharedValueFiles": [
                     "/overrides/values-{{ $.Values.global.clusterPlatform }}.yaml"
                 ],
@@ -40,14 +40,14 @@ def _make_valid_pattern(path):
                     "vault": {
                         "name": "vault",
                         "namespace": "vault",
-                        "project": "hub",
+                        "project": "prod",
                         "chart": "hashicorp-vault",
                         "chartVersion": "0.1.*",
                     },
                     "myapp": {
                         "name": "myapp",
                         "namespace": "myapp",
-                        "project": "hub",
+                        "project": "prod",
                         "path": "charts/all/myapp",
                     },
                 },
@@ -114,7 +114,7 @@ class TestValidateDetectsErrors:
             yaml.dump({
                 "global": {
                     "pattern": "test",
-                    "main": {"clusterGroupName": "hub", "multiSourceConfig": {"enabled": True}},
+                    "main": {"clusterGroupName": "prod", "multiSourceConfig": {"enabled": True}},
                 },
             }, f, sort_keys=False)
         result = validate(str(pat))
@@ -127,7 +127,7 @@ class TestValidateDetectsErrors:
             f.write("---\n")
             yaml.dump({
                 "global": {"pattern": "test"},
-                "main": {"clusterGroupName": "hub",
+                "main": {"clusterGroupName": "prod",
                          "multiSourceConfig": {"enabled": False}},
             }, f, sort_keys=False)
         result = validate(str(pat))
@@ -187,7 +187,7 @@ class TestValidateAndFix:
             yaml.dump({
                 "global": {
                     "pattern": "test",
-                    "main": {"clusterGroupName": "hub",
+                    "main": {"clusterGroupName": "prod",
                              "multiSourceConfig": {"enabled": True,
                                                    "clusterGroupChartVersion": "0.9.*"}},
                 },
@@ -203,7 +203,7 @@ class TestValidateAndFix:
             f.write("---\n")
             yaml.dump({
                 "global": {"pattern": "test"},
-                "main": {"clusterGroupName": "hub",
+                "main": {"clusterGroupName": "prod",
                          "multiSourceConfig": {"enabled": False}},
             }, f, sort_keys=False)
         result = validate_and_fix(str(pat))
@@ -277,7 +277,7 @@ class TestValidateAndFix:
             yaml.dump({
                 "global": {
                     "pattern": "test",
-                    "main": {"clusterGroupName": "hub",
+                    "main": {"clusterGroupName": "prod",
                              "multiSourceConfig": {"enabled": False}},
                 },
             }, f, sort_keys=False)
@@ -296,30 +296,30 @@ def _make_valid_remote_pattern(path):
     """Create a minimal valid remote-strategy pattern."""
     _make_valid_pattern(path)
 
-    # Update values-hub.yaml with remote app + pattern-secrets
-    with open(path / "values-hub.yaml", "w") as f:
+    # Update values-prod.yaml with remote app + secrets chart
+    with open(path / "values-prod.yaml", "w") as f:
         yaml.dump({
             "clusterGroup": {
-                "name": "hub",
+                "name": "prod",
                 "isHubCluster": True,
                 "namespaces": ["vault", "rag"],
                 "subscriptions": {},
-                "projects": ["hub"],
+                "projects": ["prod"],
                 "sharedValueFiles": [
                     "/overrides/values-{{ $.Values.global.clusterPlatform }}.yaml"
                 ],
                 "applications": {
                     "vault": {
-                        "name": "vault", "namespace": "vault", "project": "hub",
+                        "name": "vault", "namespace": "vault", "project": "prod",
                         "chart": "hashicorp-vault", "chartVersion": "0.1.*",
                     },
                     "golang-external-secrets": {
                         "name": "golang-external-secrets",
-                        "namespace": "golang-external-secrets", "project": "hub",
+                        "namespace": "golang-external-secrets", "project": "prod",
                         "chart": "golang-external-secrets", "chartVersion": "0.2.*",
                     },
                     "rag-quickstart": {
-                        "name": "rag-quickstart", "namespace": "rag", "project": "hub",
+                        "name": "rag-quickstart", "namespace": "rag", "project": "prod",
                         "repoURL": "https://github.com/rh-ai-quickstart/RAG",
                         "path": "deploy/helm/rag",
                         "chartVersion": "main",
@@ -328,19 +328,19 @@ def _make_valid_remote_pattern(path):
                              "jsonPointers": ["/spec/host"]},
                         ],
                     },
-                    "pattern-secrets": {
-                        "name": "pattern-secrets", "namespace": "rag", "project": "hub",
-                        "path": "charts/pattern-secrets",
+                    "rag-quickstart-secrets": {
+                        "name": "rag-quickstart-secrets", "namespace": "rag", "project": "prod",
+                        "path": "charts/rag-quickstart-secrets",
                     },
                 },
             }
         }, f, sort_keys=False)
 
-    # Create pattern-secrets chart
-    ps_dir = path / "charts" / "pattern-secrets"
+    # Create secrets chart
+    ps_dir = path / "charts" / "rag-quickstart-secrets"
     ps_dir.mkdir(parents=True)
     with open(ps_dir / "Chart.yaml", "w") as f:
-        yaml.dump({"apiVersion": "v2", "name": "pattern-secrets", "version": "0.1.0"}, f)
+        yaml.dump({"apiVersion": "v2", "name": "rag-quickstart-secrets", "version": "0.1.0"}, f)
     tmpl_dir = ps_dir / "templates"
     tmpl_dir.mkdir()
     with open(tmpl_dir / "pgvector-secret.yaml", "w") as f:
@@ -360,38 +360,38 @@ class TestRemoteStrategyValidation:
         assert result.valid is True
         assert len([i for i in result.issues if i.severity == "error"]) == 0
 
-    def test_pattern_secrets_path_accepted(self, tmp_path):
+    def test_secrets_chart_path_accepted(self, tmp_path):
         pat = tmp_path / "pattern"
         _make_valid_remote_pattern(pat)
         result = validate(str(pat))
-        assert not any("charts/all/" in i.message and "pattern-secrets" in i.message
+        assert not any("charts/all/" in i.message and "secrets" in i.message
                        for i in result.issues)
 
-    def test_missing_pattern_secrets_dir_detected(self, tmp_path):
+    def test_missing_secrets_dir_detected(self, tmp_path):
         pat = tmp_path / "pattern"
         _make_valid_remote_pattern(pat)
         import shutil
-        shutil.rmtree(pat / "charts" / "pattern-secrets")
+        shutil.rmtree(pat / "charts" / "rag-quickstart-secrets")
         result = validate(str(pat))
-        assert any("pattern-secrets" in i.message and "missing" in i.message.lower()
+        assert any("rag-quickstart-secrets" in i.message and "missing" in i.message.lower()
                     for i in result.issues)
 
     def test_missing_chart_yaml_detected(self, tmp_path):
         pat = tmp_path / "pattern"
         _make_valid_remote_pattern(pat)
-        (pat / "charts" / "pattern-secrets" / "Chart.yaml").unlink()
+        (pat / "charts" / "rag-quickstart-secrets" / "Chart.yaml").unlink()
         result = validate(str(pat))
         assert any("Chart.yaml" in i.message for i in result.issues)
 
     def test_invalid_ignore_differences_missing_kind(self, tmp_path):
         pat = tmp_path / "pattern"
         _make_valid_remote_pattern(pat)
-        with open(pat / "values-hub.yaml") as f:
+        with open(pat / "values-prod.yaml") as f:
             data = yaml.safe_load(f)
         data["clusterGroup"]["applications"]["rag-quickstart"]["ignoreDifferences"] = [
             {"jsonPointers": ["/spec/host"]},
         ]
-        with open(pat / "values-hub.yaml", "w") as f:
+        with open(pat / "values-prod.yaml", "w") as f:
             yaml.dump(data, f, sort_keys=False)
         result = validate(str(pat))
         assert any("missing 'kind'" in i.message for i in result.issues)
@@ -399,12 +399,12 @@ class TestRemoteStrategyValidation:
     def test_invalid_ignore_differences_missing_pointers(self, tmp_path):
         pat = tmp_path / "pattern"
         _make_valid_remote_pattern(pat)
-        with open(pat / "values-hub.yaml") as f:
+        with open(pat / "values-prod.yaml") as f:
             data = yaml.safe_load(f)
         data["clusterGroup"]["applications"]["rag-quickstart"]["ignoreDifferences"] = [
             {"kind": "Route"},
         ]
-        with open(pat / "values-hub.yaml", "w") as f:
+        with open(pat / "values-prod.yaml", "w") as f:
             yaml.dump(data, f, sort_keys=False)
         result = validate(str(pat))
         assert any("missing 'jsonPointers'" in i.message for i in result.issues)
@@ -412,7 +412,7 @@ class TestRemoteStrategyValidation:
     def test_warns_on_v1beta1_external_secret(self, tmp_path):
         pat = tmp_path / "pattern"
         _make_valid_remote_pattern(pat)
-        tmpl = pat / "charts" / "pattern-secrets" / "templates" / "pgvector-secret.yaml"
+        tmpl = pat / "charts" / "rag-quickstart-secrets" / "templates" / "pgvector-secret.yaml"
         with open(tmpl, "w") as f:
             yaml.dump({
                 "apiVersion": "external-secrets.io/v1beta1",

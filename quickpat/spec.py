@@ -173,7 +173,7 @@ def build_from_spec(spec: dict, spec_path: str = "") -> tuple:
         'app_name': app_name,
         'app_namespace': app_ns,
         'operators': operators,
-        'chart_strategy': 'local',  # per-chart strategy via ChartInfo
+        'chart_strategy': 'remote',  # per-chart strategy via ChartInfo
         'use_vault': vault_cfg.get('enabled', bool(secrets)),
         'tier': spec.get('tier', 'sandbox'),
         'clustergroup_version': opts.get('clustergroup_version', '0.9.*'),

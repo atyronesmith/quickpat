@@ -209,7 +209,7 @@ class TestCreateFromSpec:
         assert result.success
         p = Path(out)
         assert (p / "values-global.yaml").exists()
-        assert (p / "values-hub.yaml").exists()
+        assert (p / "values-prod.yaml").exists()
         assert (p / "pattern-metadata.yaml").exists()
         assert (p / "values-secret.yaml.template").exists()
         assert (p / "charts" / "all" / "myapp" / "Chart.yaml").exists()
@@ -220,7 +220,7 @@ class TestCreateFromSpec:
         assert meta["tier"] == "tested"
 
         # Check operator subscription
-        with open(p / "values-hub.yaml") as f:
+        with open(p / "values-prod.yaml") as f:
             hub = yaml.safe_load(f)
         subs = hub["clusterGroup"]["subscriptions"]
         assert "nvidia" in subs
@@ -240,7 +240,7 @@ class TestCreateFromSpec:
 
         assert result.success
         p = Path(out)
-        with open(p / "values-hub.yaml") as f:
+        with open(p / "values-prod.yaml") as f:
             hub = yaml.safe_load(f)
         apps = hub["clusterGroup"]["applications"]
         assert "remote-app" in apps
@@ -266,7 +266,7 @@ class TestCreateFromSpec:
         assert (p / "charts" / "all" / "local-svc" / "Chart.yaml").exists()
         assert not (p / "charts" / "all" / "ext-svc").exists()
 
-        with open(p / "values-hub.yaml") as f:
+        with open(p / "values-prod.yaml") as f:
             hub = yaml.safe_load(f)
         apps = hub["clusterGroup"]["applications"]
         assert "path" in apps["local-svc"]

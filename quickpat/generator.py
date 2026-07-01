@@ -41,7 +41,7 @@ class PatternGenerator:
         self._generate_license()
 
         # Copy charts with local strategy (per-chart or global default)
-        default_strategy = self.config.get('chart_strategy', 'local')
+        default_strategy = self.config.get('chart_strategy', 'remote')
         has_local = any(
             (ci.strategy or default_strategy) == 'local'
             for ci in self.analysis.charts
@@ -49,7 +49,7 @@ class PatternGenerator:
         if has_local:
             self._copy_chart_locally()
 
-        # Remote strategy: pattern-secrets chart + override file
+        # Remote strategy: {app-name}-secrets chart + override file
         has_remote = any(
             (ci.strategy or default_strategy) == 'remote'
             for ci in self.analysis.charts
@@ -84,7 +84,7 @@ class PatternGenerator:
             self.output_dir / 'values-global.yaml', data, doc_start=True
         )
 
-    # ── values-hub.yaml ─────────────────────────────────────────────
+    # ── values-{clusterGroupName}.yaml ────────────────────────────────
 
     def _generate_values_hub(self):
         operators = self.config.get('operators', [])
@@ -98,7 +98,7 @@ class PatternGenerator:
             app_name, app_namespace, use_vault
         )
 
-        group_name = self.config.get('cluster_group_name', 'hub')
+        group_name = self.config.get('cluster_group_name', 'prod')
         data = {
             'clusterGroup': {
                 'name': group_name,
@@ -205,7 +205,7 @@ class PatternGenerator:
 
     def _build_applications(self, app_name, app_namespace, use_vault):
         applications = {}
-        group_name = self.config.get('cluster_group_name', 'hub')
+        group_name = self.config.get('cluster_group_name', 'prod')
 
         # Vault and external secrets (standard infrastructure)
         if use_vault:
@@ -242,7 +242,7 @@ class PatternGenerator:
                 }
 
         # Application chart(s)
-        default_strategy = self.config.get('chart_strategy', 'local')
+        default_strategy = self.config.get('chart_strategy', 'remote')
         has_remote = False
         for name, ns, ci in self._get_app_charts():
             strategy = ci.strategy or default_strategy
@@ -285,14 +285,15 @@ class PatternGenerator:
                     ),
                 }
 
-        # Pattern-secrets chart for remote strategy with vault
+        # Secrets chart for remote strategy with vault
         if has_remote and use_vault:
             app_namespace = self.config.get('app_namespace', self.analysis.name)
-            applications['pattern-secrets'] = {
-                'name': 'pattern-secrets',
+            secrets_chart_name = f"{app_name}-secrets"
+            applications[secrets_chart_name] = {
+                'name': secrets_chart_name,
                 'namespace': app_namespace,
                 'project': group_name,
-                'path': 'charts/pattern-secrets',
+                'path': f'charts/{secrets_chart_name}',
             }
 
         return applications
@@ -304,7 +305,7 @@ class PatternGenerator:
             return
 
         # Remote strategy: grouped secrets by service name
-        default_strategy = self.config.get('chart_strategy', 'local')
+        default_strategy = self.config.get('chart_strategy', 'remote')
         has_remote = any(
             (ci.strategy or default_strategy) == 'remote'
             for ci in self.analysis.charts
@@ -713,7 +714,7 @@ podman run -it --rm --pull=newer \
                     f'# Platform-specific overrides for {platform}\n'
                 )
 
-    # ── remote strategy: pattern-secrets chart ────────────────────
+    # ── remote strategy: secrets chart ─────────────────────────────
 
     @staticmethod
     def _transform_computed_template(template, source_fields):
@@ -751,8 +752,10 @@ podman run -it --rm --pull=newer \
         return t
 
     def _generate_pattern_secrets_chart(self):
-        """Generate charts/pattern-secrets/ with ExternalSecret CRDs."""
-        chart_dir = self.output_dir / 'charts' / 'pattern-secrets'
+        """Generate charts/{app-name}-secrets/ with ExternalSecret CRDs."""
+        app_name = self.config.get('app_name', self.analysis.name)
+        secrets_chart_name = f"{app_name}-secrets"
+        chart_dir = self.output_dir / 'charts' / secrets_chart_name
         chart_dir.mkdir(parents=True, exist_ok=True)
         tmpl_dir = chart_dir / 'templates'
         tmpl_dir.mkdir(exist_ok=True)
@@ -760,7 +763,7 @@ podman run -it --rm --pull=newer \
         pattern_name = self.config['pattern_name']
         self._write_yaml(chart_dir / 'Chart.yaml', {
             'apiVersion': 'v2',
-            'name': 'pattern-secrets',
+            'name': secrets_chart_name,
             'version': '0.1.0',
             'description': f'ExternalSecret CRDs for {pattern_name}',
             'type': 'application',
@@ -844,7 +847,7 @@ podman run -it --rm --pull=newer \
     # ── charts ──────────────────────────────────────────────────────
 
     def _copy_chart_locally(self):
-        default_strategy = self.config.get('chart_strategy', 'local')
+        default_strategy = self.config.get('chart_strategy', 'remote')
         for ci in self.analysis.charts:
             strategy = ci.strategy or default_strategy
             if strategy != 'local':
@@ -863,14 +866,19 @@ podman run -it --rm --pull=newer \
         """Generate pattern-agnostic CRC validation scripts."""
         scripts_dir = self.output_dir / 'scripts'
         scripts_dir.mkdir(exist_ok=True)
+        gn = self.config.get('cluster_group_name', 'prod')
+        values_file = f"values-{gn}.yaml"
+
+        def _sub(script):
+            return script.replace('$VALUES_GROUP_FILE', values_file)
 
         self._write_script(scripts_dir / 'crc-setup.sh', _SCRIPT_CRC_SETUP)
         self._write_script(scripts_dir / 'deploy.sh', _SCRIPT_DEPLOY)
         self._write_script(
-            scripts_dir / 'validate-deployment.sh', _SCRIPT_VALIDATE,
+            scripts_dir / 'validate-deployment.sh', _sub(_SCRIPT_VALIDATE),
         )
-        self._write_script(scripts_dir / 'undeploy.sh', _SCRIPT_UNDEPLOY)
-        self._write_script(scripts_dir / 'status.sh', _SCRIPT_STATUS)
+        self._write_script(scripts_dir / 'undeploy.sh', _sub(_SCRIPT_UNDEPLOY))
+        self._write_script(scripts_dir / 'status.sh', _sub(_SCRIPT_STATUS))
 
         self._write_yaml(scripts_dir / 'dsc.yaml', {
             'apiVersion': 'datasciencecluster.opendatahub.io/v1',
@@ -964,7 +972,9 @@ podman run -it --rm --pull=newer \
         lines.append('')
         lines.append('```')
         lines.append('values-global.yaml          # Global config, multisource settings')
-        lines.append('values-hub.yaml             # Hub cluster: namespaces, operators, apps')
+        gn = self.config.get('cluster_group_name', 'prod')
+        pad = ' ' * max(1, 28 - len(f'values-{gn}.yaml'))
+        lines.append(f'values-{gn}.yaml{pad}# Cluster group: namespaces, operators, apps')
         lines.append('values-secret.yaml.template # Vault secrets template')
         lines.append('Makefile                    # Build targets')
         lines.append('pattern.sh                  # VP utility container runner')
@@ -1147,7 +1157,7 @@ def build_report(analysis, config=None):
             f"- **Namespace:** {config.get('app_namespace', name)}"
         )
         lines.append(
-            f"- **Chart strategy:** {config.get('chart_strategy', 'local')}"
+            f"- **Chart strategy:** {config.get('chart_strategy', 'remote')}"
         )
         lines.append(
             f"- **Vault enabled:** {config.get('use_vault', False)}"
@@ -1585,7 +1595,7 @@ echo ""
 # --- Phase 3: Namespaces ---
 echo "--- Phase 3: Namespaces ---"
 
-APP_NS=$(grep -A2 'namespaces:' "$PATTERN_DIR/values-hub.yaml" 2>/dev/null | grep '^\s*-' | sed 's/^\s*-\s*//' | sed 's/:.*//' | tr -d ' ' || echo "")
+APP_NS=$(grep -A2 'namespaces:' "$PATTERN_DIR/$VALUES_GROUP_FILE" 2>/dev/null | grep '^\s*-' | sed 's/^\s*-\s*//' | sed 's/:.*//' | tr -d ' ' || echo "")
 EXPECTED_NS="vault external-secrets $APP_NS"
 for ns in $EXPECTED_NS; do
     if [ -z "$ns" ]; then continue; fi
@@ -1773,7 +1783,7 @@ oc delete datasciencecluster --all -A 2>/dev/null || true
 
 echo ""
 echo "Deleting application namespaces..."
-APP_NS=$(grep -A2 'namespaces:' "$PATTERN_DIR/values-hub.yaml" 2>/dev/null | grep '^\s*-' | sed 's/^\s*-\s*//' | sed 's/:.*//' | tr -d ' ' || echo "")
+APP_NS=$(grep -A2 'namespaces:' "$PATTERN_DIR/$VALUES_GROUP_FILE" 2>/dev/null | grep '^\s*-' | sed 's/^\s*-\s*//' | sed 's/:.*//' | tr -d ' ' || echo "")
 for ns in vault external-secrets $APP_NS; do
     if [ -z "$ns" ]; then continue; fi
     if oc get namespace "$ns" &>/dev/null; then
@@ -1847,7 +1857,7 @@ oc get pods -n openshift-marketplace --no-headers 2>/dev/null | awk '{printf "  
 
 echo ""
 echo "--- Application Pods ---"
-APP_NS=$(grep -A2 'namespaces:' "$PATTERN_DIR/values-hub.yaml" 2>/dev/null | grep '^\s*-' | sed 's/^\s*-\s*//' | sed 's/:.*//' | tr -d ' ' || echo "")
+APP_NS=$(grep -A2 'namespaces:' "$PATTERN_DIR/$VALUES_GROUP_FILE" 2>/dev/null | grep '^\s*-' | sed 's/^\s*-\s*//' | sed 's/:.*//' | tr -d ' ' || echo "")
 for ns in vault external-secrets $APP_NS; do
     if [ -z "$ns" ]; then continue; fi
     if ! oc get namespace "$ns" &>/dev/null 2>&1; then continue; fi

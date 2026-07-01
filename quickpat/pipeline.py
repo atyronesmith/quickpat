@@ -157,7 +157,7 @@ def transform(
     pattern_name: str = None,
     llm: Provider = None,
     use_vault: bool = True,
-    chart_strategy: str = "local",
+    chart_strategy: str = "remote",
     auto_fix: bool = True,
     max_fix_iterations: int = 3,
     extra_config: dict = None,
@@ -452,7 +452,7 @@ def _build_new_profile(
             overrides.append(OverrideEntry(
                 path=f"{sc_name}.{gate.condition_path}",
                 value=False,
-                reason="Secrets managed by pattern-secrets chart",
+                reason="Secrets managed by secrets chart",
             ))
     profile.override_entries = overrides
 
@@ -669,7 +669,7 @@ def _llm_classify_secrets(
 def _list_created_files(output_dir: str, config: dict) -> list:
     files = [
         "values-global.yaml",
-        "values-hub.yaml",
+        f"values-{config.get('cluster_group_name', 'prod')}.yaml",
         "Makefile",
         "Makefile-common",
         "pattern.sh",
@@ -690,9 +690,11 @@ def _list_created_files(output_dir: str, config: dict) -> list:
         else:
             files.append(f"charts/all/{config.get('app_name', 'app')}/")
     elif config.get("chart_strategy") == "remote":
-        ps_dir = Path(output_dir) / "charts" / "pattern-secrets"
+        app_name = config.get("app_name", "app")
+        secrets_chart_name = f"{app_name}-secrets"
+        ps_dir = Path(output_dir) / "charts" / secrets_chart_name
         if ps_dir.is_dir():
-            files.append("charts/pattern-secrets/")
+            files.append(f"charts/{secrets_chart_name}/")
         profile_path = Path(output_dir) / ".quickpat" / "profile.yaml"
         if profile_path.exists():
             files.append(".quickpat/profile.yaml")

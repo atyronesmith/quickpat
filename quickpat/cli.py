@@ -832,7 +832,8 @@ def print_results(config):
     print(f"\n--- Pattern Generated ---\n")
     print(f"Created: {output}/")
     print(f"  values-global.yaml")
-    print(f"  values-hub.yaml")
+    gn = config.get('cluster_group_name', 'prod')
+    print(f"  values-{gn}.yaml")
     if config.get('use_vault'):
         print(f"  values-secret.yaml.template")
     print(f"  Makefile")
@@ -855,7 +856,7 @@ def print_results(config):
     print(f"\nNext steps:")
     print(f"  1. cd {output}")
     print(f"  2. git init && git add -A && git commit -m 'Initial pattern'")
-    print(f"  3. Review and customize values-hub.yaml")
+    print(f"  3. Review and customize values-{gn}.yaml")
     print(f"  4. cp values-secret.yaml.template ~/values-secret-{config['pattern_name']}.yaml")
     print(f"  5. Edit ~/values-secret-{config['pattern_name']}.yaml with your secrets")
     print(f"  6. oc login <cluster>")
