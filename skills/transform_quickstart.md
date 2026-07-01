@@ -121,8 +121,8 @@ A valid pattern produces exactly these files:
     values-GCP.yaml
     values-IBMCloud.yaml
     values-None.yaml
-  charts/all/<app-name>/      # Quickstart Helm chart(s) (local strategy)
-  charts/all/<app-name-2>/    # Additional charts for multi-chart quickstarts
+  charts/<app-name>/      # Quickstart Helm chart(s) (local strategy)
+  charts/<app-name-2>/    # Additional charts for multi-chart quickstarts
   docs/
     quickstart-analysis.md    # Generated analysis report
 ```
@@ -213,13 +213,13 @@ clusterGroup:
       name: <app-name>
       namespace: <app-namespace>      # Group namespace if multi-chart grouped
       project: hub
-      path: charts/all/<app-name>
+      path: charts/<app-name>
     # Multi-chart: additional applications
     <app-name-2>:
       name: <app-name-2>
       namespace: <app-namespace-2>
       project: hub
-      path: charts/all/<app-name-2>
+      path: charts/<app-name-2>
 ```
 
 **For external chart strategy** (instead of `path:`):
@@ -306,7 +306,7 @@ After generating a pattern, the validator runs deterministic structural checks a
 - [ ] `values-global.yaml`: `clusterGroupChartVersion` present in multiSourceConfig
 - [ ] `values-prod.yaml`: vault + golang-external-secrets apps present (if vault enabled)
 - [ ] `values-prod.yaml`: Infrastructure apps use `chart:` + `chartVersion:` (not `path:`)
-- [ ] `values-prod.yaml`: Application apps use `path: charts/all/<name>` (local) or `repoURL:` (external)
+- [ ] `values-prod.yaml`: Application apps use `path: charts/<name>` (local) or `repoURL:` (external)
 - [ ] `values-prod.yaml`: `sharedValueFiles` references overrides template
 - [ ] `values-prod.yaml`: Operators with dedicated namespaces have `operatorGroup: true` where needed
 - [ ] `values-prod.yaml`: `projects: [prod]` (list format)
@@ -316,11 +316,11 @@ After generating a pattern, the validator runs deterministic structural checks a
 - [ ] `Makefile`: Contains only `include Makefile-common`
 - [ ] `Makefile-common`: Uses `$(ANSIBLE_RUN) rhvp.cluster_utils.*` targets
 - [ ] `pattern.sh`: Present, executable, uses utility container
-- [ ] `charts/all/<name>/`: Chart(s) copied (local strategy) with Chart.yaml
+- [ ] `charts/<name>/`: Chart(s) copied (local strategy) with Chart.yaml
 - [ ] `overrides/`: Platform files exist (AWS, Azure, GCP, IBMCloud, None)
 - [ ] No `common/` directory (not needed with multisource)
 - [ ] No `setup-common.sh` (obsolete)
-- [ ] No `charts/hub/` paths (must be `charts/all/`)
+- [ ] No `charts/hub/` paths (must be `charts/`)
 
 ### Auto-Fixable Issues
 
@@ -336,7 +336,7 @@ The validator can automatically fix these common issues:
 | `vaultPrefixes` not a list | Wrapped in list |
 | `include common/Makefile` | Changed to `include Makefile-common` |
 | `pattern.sh` not executable | `chmod 755` |
-| Chart path `charts/hub/` | Changed to `charts/all/` |
+| Chart path `charts/hub/` | Changed to `charts/` |
 | Missing `sharedValueFiles` | Added with platform override template |
 | Infra app uses `path:` | Changed to `chart:` + `chartVersion:` |
 | Missing `overrides/` directory or files | Created with platform placeholders |
@@ -348,7 +348,7 @@ The validator can automatically fix these common issues:
 | Issue | Wrong | Right |
 |-------|-------|-------|
 | main: nesting | `global: { main: ... }` | `main:` at root level |
-| Chart path | `charts/hub/` | `charts/all/` |
+| Chart path | `charts/hub/` | `charts/` |
 | Secret version | *(missing)* | `version: "2.0"` |
 | Vault prefix | `vaultPrefixOverride: "global"` | `vaultPrefixes: [global]` |
 | Makefile include | `include common/Makefile` | `include Makefile-common` |

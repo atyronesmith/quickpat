@@ -205,7 +205,7 @@ Validate a generated pattern for structural correctness. With `--fix`, runs a se
 | `--max-iterations N` | Max auto-fix iterations (default: 3) |
 | `--llm PROVIDER` | LLM provider for enhanced validation |
 
-Auto-fixable issues include missing `multiSourceConfig.enabled`, `main:` incorrectly nested under `global:`, missing `clusterGroupChartVersion`, deprecated `vaultPrefixOverride`, wrong `version: "2.0"` in secrets template, legacy Makefile includes, missing executable bit on `pattern.sh`, wrong chart paths, and missing `overrides/` directory.
+Auto-fixable issues include missing `multiSourceConfig.enabled`, `main:` incorrectly nested under `global:`, missing `clusterGroupChartVersion`, deprecated `vaultPrefixOverride`, wrong `version: "2.0"` in secrets template, legacy Makefile includes, missing executable bit on `pattern.sh`, wrong chart paths, missing `overrides/` directory, list-form namespaces (should be map), missing `singleArgoCD`, and missing `secretStore` stubs in secrets charts.
 
 ## Spec YAML Format
 
@@ -295,6 +295,24 @@ my-pattern/
 └── docs/
     └── quickstart-analysis.md
 ```
+
+## Patternizer Conformance
+
+QuickPat's generated output is validated against the [Patternizer](https://github.com/validatedpatterns/patternizer) VP authoring rules. Patternizer is the official scaffolding tool for Validated Patterns and ships two AI coding skill files — `SKILL.md` (authoring rules and common tasks) and `reference.md` (framework reference) — that define the canonical VP conventions.
+
+QuickPat enforces these conventions in two layers:
+
+**At generation time** — the generator (`quickpat/generator.py`) produces output that follows Patternizer rules:
+- Map-form namespaces (maps merge across values files; lists override)
+- ESO backtick escaping in ExternalSecret templates (`{{ ` `` ` `` `{{ .field }}` `` ` `` ` }}`)
+- Local chart paths at `charts/<name>` (not `charts/all/` or `charts/hub/`)
+- Secrets chart `values.yaml` with `secretStore` defaults and per-group key/refreshInterval stubs
+- `singleArgoCD: true` and `multiSourceConfig.enabled: true`
+- `values-secret.yaml.template` version 2.0 with `vaultPrefixes` (plural, list)
+
+**At validation time** — `quickpat validate` checks any pattern directory (not just QuickPat-generated) against these rules. Five SKILL.md-derived checks run deterministically, with auto-fix support. When `--llm` is provided, an additional 21-rule semantic review catches issues that are harder to check structurally (value stubs, hub-only Vault, subscription completeness).
+
+The Patternizer and QuickPat solve complementary problems: Patternizer scaffolds VP boilerplate around existing Helm charts in a repo, then its AI skills guide interactive authoring. QuickPat analyzes an upstream quickstart, detects operators and secrets, and generates the complete pattern programmatically.
 
 ## Supported Quickstart Layouts
 
@@ -402,7 +420,7 @@ quickpat/
 │   └── config.py       # Config loader (YAML + defaults)
 ├── skills/
 │   └── transform_quickstart.md   # Text skill for any LLM
-├── tests/              # 348 tests
+├── tests/              # 362 tests
 ├── examples/
 │   └── sample-spec.yaml
 ├── docs/

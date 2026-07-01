@@ -10,7 +10,7 @@ QuickPat converts Red Hat AI Quickstarts into Validated Patterns — GitOps-driv
 - **Pipeline:** `quickpat/pipeline.py` orchestrates analyze → detect → generate → validate
 - **Analyzer:** `quickpat/analyzer.py` — parses Helm charts, detects operators/secrets/GPU/features
 - **Generator:** `quickpat/generator.py` — emits VP directory structure (values-global, values-prod, Makefile, etc.)
-- **Validator:** `quickpat/validator.py` — structural checks + auto-fix loop
+- **Validator:** `quickpat/validator.py` — structural checks + SKILL.md conformance checks + auto-fix loop
 - **LLM providers:** `quickpat/providers/` — Protocol-based classes for OpenAI, Anthropic, Ollama, vLLM, DeepInfra. All optional; deterministic mode works without any LLM.
 - **Config:** `quickpat/config.py` — YAML config with deep-merge defaults. API keys come from environment variables, never config files.
 
@@ -41,6 +41,18 @@ pytest tests/eval/        # eval matrix: quickstarts x providers
 - On main push: publishes to `generated/<name>` branches (orphan, force-pushed)
 - Generated branches are self-contained patterns with `scripts/` (deploy, undeploy, validate, status)
 - These branches are derived output — never edit them directly
+
+## Patternizer Conformance
+
+Generated output must conform to the VP authoring rules from [Patternizer](https://github.com/validatedpatterns/patternizer)'s `SKILL.md` and `reference.md`. Key conventions enforced:
+
+- Namespaces as maps (not lists) — maps merge across values files
+- ESO backtick escaping in ExternalSecret templates
+- Chart paths: `charts/<name>` (not `charts/all/` or `charts/hub/`)
+- Secrets charts must have `values.yaml` with `secretStore` stubs
+- `singleArgoCD: true`, `multiSourceConfig.enabled: true`
+
+The validator (`validator.py`) checks these both deterministically and via LLM-enhanced review (21 rules in `VALIDATION_CHECKLIST`). When adding new generation logic, verify against the Patternizer skill files at `/path/to/patternizer/src/internal/embedded/skills/pattern-author/`.
 
 ## Security
 

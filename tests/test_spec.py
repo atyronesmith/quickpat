@@ -212,7 +212,7 @@ class TestCreateFromSpec:
         assert (p / "values-prod.yaml").exists()
         assert (p / "pattern-metadata.yaml").exists()
         assert (p / "values-secret.yaml.template").exists()
-        assert (p / "charts" / "all" / "myapp" / "Chart.yaml").exists()
+        assert (p / "charts" / "myapp" / "Chart.yaml").exists()
 
         # Check tier in metadata
         with open(p / "pattern-metadata.yaml") as f:
@@ -247,7 +247,7 @@ class TestCreateFromSpec:
         assert apps["remote-app"]["repoURL"] == "https://charts.example.com"
         assert apps["remote-app"]["namespace"] == "app-ns"
         # No local chart copy
-        assert not (p / "charts" / "all" / "remote-app").exists()
+        assert not (p / "charts" / "remote-app").exists()
 
     def test_mixed_strategies(self, tmp_path):
         chart_dir = _make_local_chart(tmp_path, "local-svc")
@@ -263,8 +263,8 @@ class TestCreateFromSpec:
 
         assert result.success
         p = Path(out)
-        assert (p / "charts" / "all" / "local-svc" / "Chart.yaml").exists()
-        assert not (p / "charts" / "all" / "ext-svc").exists()
+        assert (p / "charts" / "local-svc" / "Chart.yaml").exists()
+        assert not (p / "charts" / "ext-svc").exists()
 
         with open(p / "values-prod.yaml") as f:
             hub = yaml.safe_load(f)

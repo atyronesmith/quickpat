@@ -14,7 +14,7 @@ def _make_valid_pattern(path):
     with open(path / "values-global.yaml", "w") as f:
         f.write("---\n")
         yaml.dump({
-            "global": {"pattern": "test"},
+            "global": {"pattern": "test", "singleArgoCD": True},
             "main": {
                 "clusterGroupName": "prod",
                 "multiSourceConfig": {
@@ -30,7 +30,7 @@ def _make_valid_pattern(path):
             "clusterGroup": {
                 "name": "prod",
                 "isHubCluster": True,
-                "namespaces": ["vault"],
+                "namespaces": {"vault": {}, "myapp": {}},
                 "subscriptions": {},
                 "projects": ["prod"],
                 "sharedValueFiles": [
@@ -48,7 +48,7 @@ def _make_valid_pattern(path):
                         "name": "myapp",
                         "namespace": "myapp",
                         "project": "prod",
-                        "path": "charts/all/myapp",
+                        "path": "charts/myapp",
                     },
                 },
             }
@@ -302,7 +302,7 @@ def _make_valid_remote_pattern(path):
             "clusterGroup": {
                 "name": "prod",
                 "isHubCluster": True,
-                "namespaces": ["vault", "rag"],
+                "namespaces": {"vault": {}, "rag": {}},
                 "subscriptions": {},
                 "projects": ["prod"],
                 "sharedValueFiles": [
@@ -341,6 +341,10 @@ def _make_valid_remote_pattern(path):
     ps_dir.mkdir(parents=True)
     with open(ps_dir / "Chart.yaml", "w") as f:
         yaml.dump({"apiVersion": "v2", "name": "rag-quickstart-secrets", "version": "0.1.0"}, f)
+    with open(ps_dir / "values.yaml", "w") as f:
+        yaml.dump({
+            "secretStore": {"name": "vault-backend", "kind": "ClusterSecretStore"},
+        }, f)
     tmpl_dir = ps_dir / "templates"
     tmpl_dir.mkdir()
     with open(tmpl_dir / "pgvector-secret.yaml", "w") as f:
@@ -421,3 +425,65 @@ class TestRemoteStrategyValidation:
             }, f)
         result = validate(str(pat))
         assert any("v1beta1" in i.message for i in result.issues)
+
+
+class TestSkillMdConformanceChecks:
+    def test_namespace_list_flagged(self, tmp_path):
+        pat = tmp_path / "pattern"
+        _make_valid_pattern(pat)
+        with open(pat / "values-prod.yaml") as f:
+            data = yaml.safe_load(f)
+        data["clusterGroup"]["namespaces"] = ["vault", "myapp"]
+        with open(pat / "values-prod.yaml", "w") as f:
+            yaml.dump(data, f, sort_keys=False)
+        result = validate(str(pat))
+        assert any("must be a map" in i.message for i in result.issues)
+
+    def test_namespace_map_passes(self, tmp_path):
+        pat = tmp_path / "pattern"
+        _make_valid_pattern(pat)
+        result = validate(str(pat))
+        assert not any("must be a map" in i.message for i in result.issues)
+
+    def test_charts_all_path_flagged(self, tmp_path):
+        pat = tmp_path / "pattern"
+        _make_valid_pattern(pat)
+        with open(pat / "values-prod.yaml") as f:
+            data = yaml.safe_load(f)
+        data["clusterGroup"]["applications"]["myapp"]["path"] = "charts/all/myapp"
+        with open(pat / "values-prod.yaml", "w") as f:
+            yaml.dump(data, f, sort_keys=False)
+        result = validate(str(pat))
+        assert any("charts/all/" in i.message for i in result.issues)
+
+    def test_single_argocd_missing_warned(self, tmp_path):
+        pat = tmp_path / "pattern"
+        _make_valid_pattern(pat)
+        with open(pat / "values-global.yaml") as f:
+            data = yaml.safe_load(f)
+        data["global"].pop("singleArgoCD", None)
+        with open(pat / "values-global.yaml", "w") as f:
+            f.write("---\n")
+            yaml.dump(data, f, sort_keys=False)
+        result = validate(str(pat))
+        assert any("singleArgoCD" in i.message for i in result.issues)
+
+    def test_secrets_chart_missing_stubs_warned(self, tmp_path):
+        pat = tmp_path / "pattern"
+        _make_valid_remote_pattern(pat)
+        (pat / "charts" / "rag-quickstart-secrets" / "values.yaml").write_text("")
+        result = validate(str(pat))
+        assert any("secretStore" in i.message for i in result.issues)
+
+    def test_namespace_list_auto_fixed(self, tmp_path):
+        pat = tmp_path / "pattern"
+        _make_valid_pattern(pat)
+        with open(pat / "values-prod.yaml") as f:
+            data = yaml.safe_load(f)
+        data["clusterGroup"]["namespaces"] = ["vault", "myapp"]
+        with open(pat / "values-prod.yaml", "w") as f:
+            yaml.dump(data, f, sort_keys=False)
+        result = validate_and_fix(str(pat))
+        with open(pat / "values-prod.yaml") as f:
+            fixed = yaml.safe_load(f)
+        assert isinstance(fixed["clusterGroup"]["namespaces"], dict)

@@ -216,7 +216,7 @@ def transform(
     if enable_transform and chart_strategy == "local":
         from .transformer import transform_chart as tx_chart
         for ci in analysis.charts:
-            chart_output = Path(output_dir) / "charts" / "all" / ci.name
+            chart_output = Path(output_dir) / "charts" / ci.name
             if chart_output.is_dir():
                 tx_result = tx_chart(
                     str(chart_output), analysis, ci,
@@ -682,13 +682,13 @@ def _list_created_files(output_dir: str, config: dict) -> list:
     if config.get("use_vault"):
         files.append("values-secret.yaml.template")
     if config.get("chart_strategy") == "local":
-        charts_dir = Path(output_dir) / "charts" / "all"
+        charts_dir = Path(output_dir) / "charts"
         if charts_dir.is_dir():
             for d in sorted(charts_dir.iterdir()):
-                if d.is_dir():
-                    files.append(f"charts/all/{d.name}/")
+                if d.is_dir() and not d.name.endswith('-secrets'):
+                    files.append(f"charts/{d.name}/")
         else:
-            files.append(f"charts/all/{config.get('app_name', 'app')}/")
+            files.append(f"charts/{config.get('app_name', 'app')}/")
     elif config.get("chart_strategy") == "remote":
         app_name = config.get("app_name", "app")
         secrets_chart_name = f"{app_name}-secrets"

@@ -43,7 +43,7 @@ class TestSingleChartGeneration:
     def test_copies_chart_locally(self, single_chart_quickstart, tmp_path):
         out, _, _ = _generate(single_chart_quickstart, tmp_path)
         from pathlib import Path
-        assert (Path(out) / "charts" / "all" / "myapp" / "Chart.yaml").exists()
+        assert (Path(out) / "charts" / "myapp" / "Chart.yaml").exists()
 
     def test_values_global_structure(self, single_chart_quickstart, tmp_path):
         out, _, _ = _generate(single_chart_quickstart, tmp_path)
@@ -62,7 +62,7 @@ class TestSingleChartGeneration:
             data = yaml.safe_load(f)
         apps = data["clusterGroup"]["applications"]
         assert "myapp" in apps
-        assert apps["myapp"]["path"] == "charts/all/myapp"
+        assert apps["myapp"]["path"] == "charts/myapp"
 
     def test_overrides_created(self, single_chart_quickstart, tmp_path):
         out, _, _ = _generate(single_chart_quickstart, tmp_path)
@@ -94,7 +94,7 @@ class TestMultiChartGeneration:
     def test_copies_all_charts(self, multi_chart_quickstart, tmp_path):
         out, _, _ = _generate(multi_chart_quickstart, tmp_path)
         from pathlib import Path
-        charts = Path(out) / "charts" / "all"
+        charts = Path(out) / "charts"
         assert (charts / "app" / "Chart.yaml").exists()
         assert (charts / "db" / "Chart.yaml").exists()
         assert (charts / "ui" / "Chart.yaml").exists()
@@ -105,14 +105,11 @@ class TestMultiChartGeneration:
         with open(Path(out) / "values-prod.yaml") as f:
             data = yaml.safe_load(f)
         namespaces = data["clusterGroup"]["namespaces"]
-        # Find which namespaces have opendatahub labels
-        labeled = []
-        for ns in namespaces:
-            if isinstance(ns, dict):
-                for name, conf in ns.items():
-                    if isinstance(conf, dict) and "labels" in conf:
-                        if "opendatahub.io/dashboard" in conf.get("labels", {}):
-                            labeled.append(name)
+        assert isinstance(namespaces, dict)
+        labeled = [
+            name for name, conf in namespaces.items()
+            if isinstance(conf, dict) and "opendatahub.io/dashboard" in conf.get("labels", {})
+        ]
         assert "app" in labeled
         assert "db" not in labeled
         assert "ui" not in labeled
@@ -139,12 +136,8 @@ class TestGroupedNamespaces:
         with open(Path(out) / "values-prod.yaml") as f:
             data = yaml.safe_load(f)
         namespaces = data["clusterGroup"]["namespaces"]
-        ns_names = []
-        for ns in namespaces:
-            if isinstance(ns, dict):
-                ns_names.extend(ns.keys())
-        # "observability" should appear exactly once
-        assert ns_names.count("observability") == 1
+        assert isinstance(namespaces, dict)
+        assert "observability" in namespaces
 
     def test_oai_labels_on_grouped_namespace(self, grouped_chart_quickstart, tmp_path):
         """If any chart in a group needs OAI labels, the namespace gets them."""
@@ -153,13 +146,9 @@ class TestGroupedNamespaces:
         with open(Path(out) / "values-prod.yaml") as f:
             data = yaml.safe_load(f)
         namespaces = data["clusterGroup"]["namespaces"]
-        # The "inference" namespace should have OAI labels (model has llm-service dep)
-        for ns in namespaces:
-            if isinstance(ns, dict) and "inference" in ns:
-                assert "opendatahub.io/dashboard" in ns["inference"]["labels"]
-                break
-        else:
-            pytest.fail("inference namespace not found with OAI labels")
+        assert isinstance(namespaces, dict)
+        assert "inference" in namespaces
+        assert "opendatahub.io/dashboard" in namespaces["inference"]["labels"]
 
 
 class TestSecretDedup:
@@ -276,7 +265,7 @@ class TestNewConfigKeys:
         with open(Path(out) / "values-prod.yaml") as f:
             data = yaml.safe_load(f)
         apps = data["clusterGroup"]["applications"]
-        assert apps["local-app"]["path"] == "charts/all/local-app"
+        assert apps["local-app"]["path"] == "charts/local-app"
         assert "repoURL" not in apps["local-app"]
         assert apps["ext-app"]["repoURL"] == "https://charts.example.com"
         assert "path" not in apps["ext-app"]
@@ -335,7 +324,6 @@ class TestTransformComputedTemplate:
         assert "{{ .host }}" in t
         assert "{{ .port }}" in t
         assert "{{ .dbname }}" in t
-        # The include consumed one %s — format should still be well-formed
         assert "%s" not in t
 
     def test_strips_values_without_secret(self):
@@ -351,6 +339,13 @@ class TestTransformComputedTemplate:
             ["host", "port", "dbname"],
         )
         assert t == 'jdbc:postgresql://{{ .host }}:{{ .port }}/{{ .dbname }}'
+
+    def test_eso_escape(self):
+        assert PatternGenerator._eso_escape('{{ .user }}') == '{{ `{{ .user }}` }}'
+        assert PatternGenerator._eso_escape(
+            'jdbc:postgresql://{{ .host }}:{{ .port }}/{{ .dbname }}',
+        ) == 'jdbc:postgresql://{{ `{{ .host }}` }}:{{ `{{ .port }}` }}/{{ `{{ .dbname }}` }}'
+        assert PatternGenerator._eso_escape('literal') == 'literal'
 
 
 def _remote_config(tmp_path, **overrides):
@@ -508,8 +503,8 @@ class TestRemoteStrategyGeneration:
         tmpl_data = data["spec"]["target"]["template"]["data"]
         assert "jdbc-uri" in tmpl_data
         assert "postgresql://" in tmpl_data["jdbc-uri"]
-        # Non-computed fields use simple template reference
-        assert tmpl_data["user"] == "{{ .user }}"
+        # Non-computed fields use backtick-escaped template reference
+        assert tmpl_data["user"] == "{{ `{{ .user }}` }}"
 
     def test_override_file_created(self, tmp_path):
         out, _, _ = _remote_config(tmp_path)
@@ -565,7 +560,9 @@ class TestRemoteStrategyGeneration:
     def test_no_local_chart_copy_for_remote(self, tmp_path):
         out, _, _ = _remote_config(tmp_path)
         from pathlib import Path
-        assert not (Path(out) / "charts" / "all").exists()
+        charts = Path(out) / "charts"
+        for d in charts.iterdir():
+            assert d.name.endswith("-secrets"), f"unexpected chart dir: {d.name}"
 
     def test_no_secrets_chart_without_vault(self, tmp_path):
         out, _, _ = _remote_config(tmp_path, use_vault=False)
@@ -610,8 +607,8 @@ class TestRemoteStrategyGeneration:
         tmpl = data["spec"]["target"]["template"]["data"]["jdbc-uri"]
         assert ".Values." not in tmpl
         assert "b64enc" not in tmpl
-        assert "{{ .host }}" in tmpl
-        assert "{{ .port }}" in tmpl
+        assert "{{ `{{ .host }}` }}" in tmpl
+        assert "{{ `{{ .port }}` }}" in tmpl
 
 
 class TestScriptsGeneration:
@@ -689,3 +686,73 @@ class TestRemotePathFallback:
             data = yaml.safe_load(f)
         app = data["clusterGroup"]["applications"]["rag-quickstart"]
         assert app["path"] == "deploy/helm/rag"
+
+
+class TestSkillMdConformance:
+    """Verify generated output matches Patternizer SKILL.md conventions."""
+
+    def test_namespaces_are_maps(self, single_chart_quickstart, tmp_path):
+        out, _, _ = _generate(single_chart_quickstart, tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "values-prod.yaml") as f:
+            data = yaml.safe_load(f)
+        assert isinstance(data["clusterGroup"]["namespaces"], dict)
+
+    def test_local_chart_path_no_all(self, single_chart_quickstart, tmp_path):
+        out, _, _ = _generate(single_chart_quickstart, tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "values-prod.yaml") as f:
+            data = yaml.safe_load(f)
+        for app in data["clusterGroup"]["applications"].values():
+            if "path" in app:
+                assert "/all/" not in app["path"]
+
+    def test_secrets_chart_has_values_stubs(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "charts" / "rag-quickstart-secrets" / "values.yaml") as f:
+            data = yaml.safe_load(f)
+        assert data is not None
+        assert "secretStore" in data
+        assert data["secretStore"]["name"] == "vault-backend"
+        assert data["secretStore"]["kind"] == "ClusterSecretStore"
+
+    def test_secrets_chart_has_per_group_stubs(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "charts" / "rag-quickstart-secrets" / "values.yaml") as f:
+            data = yaml.safe_load(f)
+        assert "pgvector" in data
+        assert data["pgvector"]["key"] == "secret/data/hub/pgvector"
+        assert data["pgvector"]["refreshInterval"] == "2m0s"
+
+    def test_refresh_interval_2m0s(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path)
+        from pathlib import Path
+        tmpl_dir = Path(out) / "charts" / "rag-quickstart-secrets" / "templates"
+        for tmpl_file in tmpl_dir.glob("*.yaml"):
+            with open(tmpl_file) as f:
+                data = yaml.safe_load(f)
+            if data and data.get("kind") == "ExternalSecret":
+                assert data["spec"]["refreshInterval"] == "2m0s"
+
+    def test_single_argocd_set(self, single_chart_quickstart, tmp_path):
+        out, _, _ = _generate(single_chart_quickstart, tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "values-global.yaml") as f:
+            data = yaml.safe_load(f)
+        assert data["global"]["singleArgoCD"] is True
+
+    def test_eso_backtick_escaping_in_output(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path)
+        from pathlib import Path
+        tmpl_dir = Path(out) / "charts" / "rag-quickstart-secrets" / "templates"
+        for tmpl_file in tmpl_dir.glob("*.yaml"):
+            content = tmpl_file.read_text()
+            if "ExternalSecret" in content:
+                with open(tmpl_file) as f:
+                    data = yaml.safe_load(f)
+                tmpl_data = data.get("spec", {}).get("target", {}).get("template", {}).get("data", {})
+                for key, val in tmpl_data.items():
+                    if "{{" in str(val):
+                        assert "`" in str(val), f"Unescaped ESO expression for {key}: {val}"

@@ -58,6 +58,11 @@ def validate(pattern_dir: str, config: dict = None, llm: Provider = None) -> Val
     issues.extend(_check_pattern_sh(out))
     issues.extend(_check_overrides(out))
     issues.extend(_check_no_legacy(out))
+    issues.extend(_check_namespace_format(out))
+    issues.extend(_check_chart_path_convention(out))
+    issues.extend(_check_secrets_chart_values(out))
+    issues.extend(_check_single_argocd(out))
+    issues.extend(_check_eso_backtick_escaping(out))
 
     if llm:
         issues.extend(_llm_review(out, llm))
@@ -383,6 +388,114 @@ def _check_no_legacy(out: Path) -> list:
     return issues
 
 
+# ── SKILL.md conformance checks ──────────────────────────────────────
+
+
+def _check_namespace_format(out: Path) -> list:
+    issues = []
+    hub_file = _find_values_group_file(out)
+    path = out / hub_file
+    if not path.exists():
+        return issues
+    data = _load_yaml(path)
+    if not data:
+        return issues
+    ns = (data.get("clusterGroup") or {}).get("namespaces")
+    if isinstance(ns, list):
+        issues.append(Issue(
+            hub_file, "error",
+            "namespaces must be a map (dict), not a list — lists override across values files",
+            auto_fixable=True,
+        ))
+    return issues
+
+
+def _check_chart_path_convention(out: Path) -> list:
+    issues = []
+    hub_file = _find_values_group_file(out)
+    path = out / hub_file
+    if not path.exists():
+        return issues
+    data = _load_yaml(path)
+    if not data:
+        return issues
+    apps = (data.get("clusterGroup") or {}).get("applications", {})
+    for app_name, app in apps.items():
+        p = app.get("path", "")
+        if p.startswith("charts/all/"):
+            issues.append(Issue(
+                hub_file, "error",
+                f"App '{app_name}' uses charts/all/ path — convention is charts/{app_name}",
+                auto_fixable=True,
+            ))
+    return issues
+
+
+def _check_secrets_chart_values(out: Path) -> list:
+    issues = []
+    hub_file = _find_values_group_file(out)
+    path = out / hub_file
+    if not path.exists():
+        return issues
+    data = _load_yaml(path)
+    if not data:
+        return issues
+    apps = (data.get("clusterGroup") or {}).get("applications", {})
+    for app_name in apps:
+        if not app_name.endswith("-secrets"):
+            continue
+        chart_path = apps[app_name].get("path", f"charts/{app_name}")
+        values_path = out / chart_path / "values.yaml"
+        if not values_path.exists():
+            continue
+        values_data = _load_yaml(values_path)
+        if not values_data or "secretStore" not in values_data:
+            issues.append(Issue(
+                f"{chart_path}/values.yaml", "warning",
+                "Secrets chart values.yaml missing secretStore defaults",
+                auto_fixable=True,
+            ))
+    return issues
+
+
+def _check_single_argocd(out: Path) -> list:
+    issues = []
+    path = out / "values-global.yaml"
+    if not path.exists():
+        return issues
+    data = _load_yaml(path)
+    if not data:
+        return issues
+    g = data.get("global", {})
+    if not g.get("singleArgoCD"):
+        issues.append(Issue(
+            "values-global.yaml", "warning",
+            "global.singleArgoCD should be true for new Patterns",
+            auto_fixable=True,
+        ))
+    return issues
+
+
+def _check_eso_backtick_escaping(out: Path) -> list:
+    import re
+    issues = []
+    for tmpl in out.glob("charts/*/templates/*.yaml"):
+        try:
+            content = tmpl.read_text()
+        except OSError:
+            continue
+        if "ExternalSecret" not in content:
+            continue
+        unescaped = re.findall(r'(?<!`)(\{\{\s*\.\w+\s*\}\})(?!.*`)', content)
+        if unescaped:
+            rel = str(tmpl.relative_to(out))
+            issues.append(Issue(
+                rel, "warning",
+                f"ExternalSecret has unescaped ESO template expressions: {unescaped[:3]}",
+            ))
+    return issues
+
+
 def _check_remote_strategy(out: Path, apps: dict, values_file: str = "values-prod.yaml") -> list:
     """Validate remote-strategy specific requirements."""
     issues = []
@@ -463,7 +576,14 @@ Validate this Validated Pattern against these rules:
 11. values-secret.yaml.template: Must use vaultPrefixes: (plural, list) — NOT vaultPrefixOverride
 12. Makefile: Should contain only "include Makefile-common"
 13. No common/ directory (not needed with multisource)
-14. No charts/hub/ path (should be charts/all/)
+14. Local chart paths should be charts/<name> (not charts/all/ or charts/hub/)
+15. Secrets chart values.yaml should have secretStore defaults (name: vault-backend, kind: ClusterSecretStore)
+16. Vault application and namespace belong only on the hub/main cluster, not spoke clusters
+17. ExternalSecret template data values must use backtick escaping so Helm passes them through to ESO
+18. namespaces: should be a map (dict) for merge compatibility, not a list
+19. Operator subscriptions should specify namespace and channel
+20. Local chart paths should be charts/<name>, not charts/all/<name>
+21. Chart values.yaml should have default stubs for .Values.global.* and .Values.clusterGroup.* references
 
 For each issue found, respond with exactly one line per issue in this format:
 ISSUE|<filename>|<error or warning>|<description>
@@ -629,6 +749,16 @@ def _try_fix(out: Path, issue: Issue) -> bool:
     if "overrides/" in issue.file or "overrides/ directory" in issue.message:
         return _fix_overrides(out, issue)
 
+    if issue.file == values_group and "must be a map" in issue.message:
+        return _fix_namespace_format(out / values_group)
+
+    if issue.file == "values-global.yaml" and "singleArgoCD" in issue.message:
+        return _fix_single_argocd(out / "values-global.yaml")
+
+    if "Secrets chart" in issue.message and "secretStore" in issue.message:
+        chart_path = issue.file.replace("/values.yaml", "")
+        return _fix_secrets_chart_values(out, chart_path)
+
     return False
 
 
@@ -728,18 +858,53 @@ def _fix_chart_path(path: Path) -> bool:
     apps = data.get("clusterGroup", {}).get("applications", {})
     changed = False
     for app_name, app in apps.items():
-        if app_name in ("vault", "openshift-external-secrets", "golang-external-secrets"):
-            continue
         p = app.get("path", "")
-        if p and not p.startswith("charts/all/"):
-            parts = p.split("/")
-            if len(parts) >= 2 and parts[0] == "charts":
-                parts[1] = "all"
-                app["path"] = "/".join(parts)
-                changed = True
+        if p.startswith("charts/all/"):
+            app["path"] = p.replace("charts/all/", "charts/", 1)
+            changed = True
     if changed:
         _save_yaml(path, data)
     return changed
+
+
+def _fix_namespace_format(path: Path) -> bool:
+    data = _load_yaml(path)
+    if not data:
+        return False
+    cg = data.get("clusterGroup", {})
+    ns = cg.get("namespaces")
+    if not isinstance(ns, list):
+        return False
+    ns_map = {}
+    for entry in ns:
+        if isinstance(entry, dict):
+            ns_map.update(entry)
+        elif isinstance(entry, str):
+            ns_map[entry] = {}
+    cg["namespaces"] = ns_map
+    _save_yaml(path, data)
+    return True
+
+
+def _fix_single_argocd(path: Path) -> bool:
+    data = _load_yaml(path)
+    if not data:
+        return False
+    g = data.setdefault("global", {})
+    g["singleArgoCD"] = True
+    _save_yaml(path, data, doc_start=True)
+    return True
+
+
+def _fix_secrets_chart_values(out: Path, chart_path: str) -> bool:
+    values_path = out / chart_path / "values.yaml"
+    data = _load_yaml(values_path) or {}
+    data.setdefault("secretStore", {
+        "name": "vault-backend",
+        "kind": "ClusterSecretStore",
+    })
+    _save_yaml(values_path, data)
+    return True
 
 
 def _fix_shared_value_files(path: Path) -> bool:

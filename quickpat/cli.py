@@ -482,9 +482,9 @@ def cmd_transform(args):
     from .transformer import transform_chart as tx_chart, ALL_RULES
 
     pattern_dir = Path(args.path)
-    charts_dir = pattern_dir / 'charts' / 'all'
+    charts_dir = pattern_dir / 'charts'
     if not charts_dir.is_dir():
-        print(f"Error: No charts/all/ directory in {args.path}", file=sys.stderr)
+        print(f"Error: No charts/ directory in {args.path}", file=sys.stderr)
         sys.exit(1)
 
     rules = None
@@ -850,13 +850,13 @@ def print_results(config):
     print(f"  ansible.cfg")
     print(f"  .gitignore")
     if config.get('chart_strategy') == 'local':
-        charts_dir = Path(output) / 'charts' / 'all'
+        charts_dir = Path(output) / 'charts'
         if charts_dir.is_dir():
             for d in sorted(charts_dir.iterdir()):
-                if d.is_dir():
-                    print(f"  charts/all/{d.name}/")
+                if d.is_dir() and not d.name.endswith('-secrets'):
+                    print(f"  charts/{d.name}/")
         else:
-            print(f"  charts/all/{config.get('app_name', 'app')}/")
+            print(f"  charts/{config.get('app_name', 'app')}/")
     print(f"  overrides/")
     print(f"  docs/quickstart-analysis.md")
 

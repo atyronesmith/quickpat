@@ -127,20 +127,19 @@ class PatternGenerator:
         return [(app_name, app_ns, ci)]
 
     def _build_namespaces(self, operators, app_namespace, use_vault):
-        namespaces = []
+        namespaces = {}
         seen = set()
 
         # Infrastructure namespaces
         if use_vault:
-            for ns in ('vault',):
-                namespaces.append({ns: {}})
-                seen.add(ns)
-            namespaces.append({'external-secrets-operator': {
+            namespaces['vault'] = {}
+            seen.add('vault')
+            namespaces['external-secrets-operator'] = {
                 'operatorGroup': True,
                 'targetNamespaces': [],
-            }})
+            }
             seen.add('external-secrets-operator')
-            namespaces.append({'external-secrets': {}})
+            namespaces['external-secrets'] = {}
             seen.add('external-secrets')
 
         # Operator namespaces
@@ -152,10 +151,7 @@ class PatternGenerator:
             seen.add(ns)
 
             ns_config = op.get('namespace_config')
-            if ns_config:
-                namespaces.append({ns: ns_config})
-            else:
-                namespaces.append({ns: {}})
+            namespaces[ns] = ns_config if ns_config else {}
 
         # Application namespaces — only add OAI labels where needed
         app_charts = self._get_app_charts()
@@ -169,16 +165,16 @@ class PatternGenerator:
                 continue
             seen.add(ns)
             if ns in ns_needs_labels:
-                namespaces.append({ns: {
+                namespaces[ns] = {
                     'operatorGroup': True,
                     'targetNamespaces': [ns],
                     'labels': {
                         'opendatahub.io/dashboard': 'true',
                         'modelmesh-enabled': 'false',
                     },
-                }})
+                }
             else:
-                namespaces.append({ns: {}})
+                namespaces[ns] = {}
 
         return namespaces
 
@@ -252,7 +248,7 @@ class PatternGenerator:
                     'name': name,
                     'namespace': ns,
                     'project': group_name,
-                    'path': f'charts/all/{name}',
+                    'path': f'charts/{name}',
                 }
             elif strategy == 'remote':
                 has_remote = True
@@ -718,6 +714,11 @@ podman run -it --rm --pull=newer \
     # ── remote strategy: secrets chart ─────────────────────────────
 
     @staticmethod
+    def _eso_escape(value):
+        """Wrap {{ .field }} refs in backticks so they survive Helm rendering."""
+        return re.sub(r'\{\{\s*(\.\S+?)\s*\}\}', r'{{ `{{ \1 }}` }}', value)
+
+    @staticmethod
     def _transform_computed_template(template, source_fields):
         """Convert Helm template syntax to ExternalSecret template syntax."""
         t = template
@@ -770,11 +771,21 @@ podman run -it --rm --pull=newer \
             'type': 'application',
         })
 
-        # Empty values.yaml
-        (chart_dir / 'values.yaml').write_text('')
-
         secret_groups = self.config.get('secret_groups', {})
         vault_prefix = self.config.get('vault_prefix', 'hub')
+
+        values_stubs = {
+            'secretStore': {
+                'name': 'vault-backend',
+                'kind': 'ClusterSecretStore',
+            },
+        }
+        for gn in secret_groups:
+            values_stubs[gn] = {
+                'key': f'secret/data/{vault_prefix}/{gn}',
+                'refreshInterval': '2m0s',
+            }
+        self._write_yaml(chart_dir / 'values.yaml', values_stubs)
         secret_target_names = self.config.get('secret_target_names', {})
 
         for group_name, fields in secret_groups.items():
@@ -786,8 +797,10 @@ podman run -it --rm --pull=newer \
             for f in fields:
                 fname = f['name']
                 if f.get('computed'):
-                    template_data[fname] = self._transform_computed_template(
-                        f['template'], f.get('source_fields', []),
+                    template_data[fname] = self._eso_escape(
+                        self._transform_computed_template(
+                            f['template'], f.get('source_fields', []),
+                        ),
                     )
                 else:
                     data_entries.append({
@@ -797,14 +810,14 @@ podman run -it --rm --pull=newer \
                             'property': fname,
                         },
                     })
-                    template_data[fname] = '{{ .' + fname + ' }}'
+                    template_data[fname] = '{{ `{{ .%s }}` }}' % fname
 
             ext_secret = {
                 'apiVersion': 'external-secrets.io/v1',
                 'kind': 'ExternalSecret',
                 'metadata': {'name': target_name},
                 'spec': {
-                    'refreshInterval': '15s',
+                    'refreshInterval': '2m0s',
                     'secretStoreRef': {
                         'name': 'vault-backend',
                         'kind': 'ClusterSecretStore',
@@ -853,7 +866,7 @@ podman run -it --rm --pull=newer \
             strategy = ci.strategy or default_strategy
             if strategy != 'local':
                 continue
-            dest = self.output_dir / 'charts' / 'all' / ci.name
+            dest = self.output_dir / 'charts' / ci.name
             src = Path(ci.chart_path)
 
             if dest.exists():
