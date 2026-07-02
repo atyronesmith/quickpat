@@ -282,8 +282,9 @@ class PatternGenerator:
                     ),
                 }
 
-        # Secrets chart for remote strategy with vault
-        if has_remote and use_vault:
+        # Secrets chart for remote strategy with vault (only if secrets exist)
+        secret_groups = self.config.get('secret_groups', {})
+        if has_remote and use_vault and secret_groups:
             app_namespace = self.config.get('app_namespace', self.analysis.name)
             secrets_chart_name = f"{app_name}-secrets"
             applications[secrets_chart_name] = {
@@ -755,6 +756,10 @@ podman run -it --rm --pull=newer \
 
     def _generate_pattern_secrets_chart(self):
         """Generate charts/{app-name}-secrets/ with ExternalSecret CRDs."""
+        secret_groups = self.config.get('secret_groups', {})
+        if not secret_groups:
+            return
+
         app_name = self.config.get('app_name', self.analysis.name)
         secrets_chart_name = f"{app_name}-secrets"
         chart_dir = self.output_dir / 'charts' / secrets_chart_name

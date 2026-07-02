@@ -572,6 +572,15 @@ class TestRemoteStrategyGeneration:
         assert "rag-quickstart-secrets" not in data["clusterGroup"]["applications"]
         assert not (Path(out) / "charts" / "rag-quickstart-secrets").exists()
 
+    def test_no_secrets_chart_with_empty_secret_groups(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path, secret_groups={})
+        from pathlib import Path
+        with open(Path(out) / "values-prod.yaml") as f:
+            data = yaml.safe_load(f)
+        assert "rag-quickstart-secrets" not in data["clusterGroup"]["applications"]
+        assert not (Path(out) / "charts" / "rag-quickstart-secrets").exists()
+        assert (Path(out) / "values-secret.yaml.template").exists()
+
     def test_computed_fields_not_in_spec_data(self, tmp_path):
         out, _, _ = _remote_config(tmp_path)
         from pathlib import Path
