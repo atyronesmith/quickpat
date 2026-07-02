@@ -70,6 +70,12 @@ def main():
         '--crc-scripts', action='store_true',
         help='Generate CRC deployment/validation scripts',
     )
+    create_p.add_argument(
+        '--ignore-differences',
+        help='ArgoCD ignoreDifferences as group:kind:pointer[,pointer] '
+             '(e.g. "route.openshift.io:Route:/spec/host,/spec/alternateBackends")',
+        action='append', default=[],
+    )
     _add_llm_args(create_p)
     _add_transform_args(create_p)
 
@@ -287,6 +293,12 @@ def cmd_create(args):
         })
         config = build_default_config(analysis, args, path)
         crc = getattr(args, 'crc_scripts', False)
+        ignore_diffs = _parse_ignore_differences(
+            getattr(args, 'ignore_differences', [])
+        )
+        extra = {'generate_crc_scripts': crc}
+        if ignore_diffs:
+            extra['ignore_differences'] = ignore_diffs
 
         if config['chart_strategy'] == 'remote':
             result = transform_remote(
@@ -294,7 +306,7 @@ def cmd_create(args):
                 output_dir=config['output_dir'],
                 pattern_name=config['pattern_name'],
                 llm=llm,
-                extra_config={'generate_crc_scripts': crc},
+                extra_config=extra,
             )
         else:
             tx_rules = None
@@ -309,7 +321,7 @@ def cmd_create(args):
                 chart_strategy=config['chart_strategy'],
                 extra_config={
                     k: v for k, v in config.items() if k in ('tier',)
-                } | {'generate_crc_scripts': crc},
+                } | extra,
                 enable_transform=getattr(args, 'transform', False),
                 transform_rules=tx_rules,
             )
@@ -804,6 +816,28 @@ def cmd_update(args):
     )
     _print_transform_result(result)
     sys.exit(0 if result.success else 1)
+
+
+def _parse_ignore_differences(raw_entries):
+    """Parse --ignore-differences CLI args into config dicts.
+
+    Format: group:kind:pointer[,pointer]
+    Example: route.openshift.io:Route:/spec/host,/spec/alternateBackends
+    """
+    results = []
+    for entry in raw_entries:
+        parts = entry.split(':', 2)
+        if len(parts) != 3:
+            print(f"Warning: invalid --ignore-differences format: {entry}", file=sys.stderr)
+            print("  Expected: group:kind:pointer[,pointer]", file=sys.stderr)
+            continue
+        group, kind, pointers_str = parts
+        results.append({
+            'group': group,
+            'kind': kind,
+            'jsonPointers': [p.strip() for p in pointers_str.split(',')],
+        })
+    return results or None
 
 
 def build_default_config(analysis, args, quickstart_path=None):

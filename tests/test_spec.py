@@ -90,6 +90,30 @@ class TestValidateSpec:
         })
         assert any("onMissingValue" in e for e in errors)
 
+    def test_ignore_differences_valid(self):
+        errors = validate_spec({
+            "name": "t",
+            "ignoreDifferences": [
+                {"group": "route.openshift.io", "kind": "Route",
+                 "jsonPointers": ["/spec/host"]},
+            ],
+        })
+        assert len(errors) == 0
+
+    def test_ignore_differences_missing_kind(self):
+        errors = validate_spec({
+            "name": "t",
+            "ignoreDifferences": [{"jsonPointers": ["/spec/host"]}],
+        })
+        assert any("missing 'kind'" in e for e in errors)
+
+    def test_ignore_differences_missing_pointers(self):
+        errors = validate_spec({
+            "name": "t",
+            "ignoreDifferences": [{"kind": "Route"}],
+        })
+        assert any("missing 'jsonPointers'" in e for e in errors)
+
 
 class TestBuildFromSpec:
     def test_minimal_spec(self, tmp_path):
@@ -176,6 +200,27 @@ class TestBuildFromSpec:
         }
         analysis, _ = build_from_spec(spec)
         assert analysis.charts[0].group == "custom-ns"
+
+    def test_ignore_differences_in_config(self):
+        spec = {
+            "name": "t",
+            "charts": [{"name": "x", "repo": "https://r"}],
+            "ignoreDifferences": [
+                {"group": "route.openshift.io", "kind": "Route",
+                 "jsonPointers": ["/spec/host"]},
+            ],
+        }
+        _, config = build_from_spec(spec)
+        assert len(config["ignore_differences"]) == 1
+        assert config["ignore_differences"][0]["kind"] == "Route"
+
+    def test_no_ignore_differences_by_default(self):
+        spec = {
+            "name": "t",
+            "charts": [{"name": "x", "repo": "https://r"}],
+        }
+        _, config = build_from_spec(spec)
+        assert "ignore_differences" not in config
 
     def test_invalid_spec_raises(self):
         with pytest.raises(SpecError, match="Invalid spec"):

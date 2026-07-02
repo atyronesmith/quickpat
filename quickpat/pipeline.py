@@ -89,21 +89,9 @@ OVERRIDE_REVIEW_SCHEMA = {
 # ── Static ArgoCD Ignore Rules ──────────────────────────────────────
 
 KNOWN_IGNORE_RULES: dict[tuple[str, str], list[str]] = {
-    ("route.openshift.io", "Route"): [
-        "/spec/host", "/spec/alternateBackends",
-    ],
-    ("kubeflow.org", "Notebook"): [
-        "/spec", "/metadata/annotations", "/metadata/labels",
-    ],
-    ("datasciencepipelinesapplications.opendatahub.io", "DataSciencePipelinesApplication"): [
-        "/spec",
-    ],
-    ("serving.kserve.io", "InferenceService"): [
-        "/metadata/annotations", "/metadata/labels",
-    ],
-    ("serving.knative.dev", "Service"): [
-        "/metadata/annotations", "/metadata/labels",
-    ],
+    # Empty by design. ignoreDifferences are per-QS workarounds, not a
+    # standard convention. Provide them explicitly via spec YAML or
+    # --ignore-differences CLI flag.
 }
 
 

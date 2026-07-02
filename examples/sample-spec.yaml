@@ -33,6 +33,14 @@ secrets:
 vault:
   enabled: true
 
+# ArgoCD ignoreDifferences — only add for specific known sync issues.
+# Do not use as a general-purpose workaround.
+# ignoreDifferences:
+#   - group: route.openshift.io
+#     kind: Route
+#     jsonPointers:
+#       - /spec/host
+
 options:
   syncPolicy: Automatic           # Automatic | Manual
   installPlanApproval: Automatic   # Automatic | Manual

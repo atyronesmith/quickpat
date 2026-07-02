@@ -163,6 +163,7 @@ Generate a complete Validated Pattern from a quickstart source. In interactive m
 | `--llm PROVIDER` | LLM provider for enhanced detection |
 | `--model NAME` | Model name override |
 | `--llm-url URL` | Base URL for ollama/vllm |
+| `--ignore-differences SPEC` | ArgoCD ignoreDifferences (repeatable, format: `group:kind:pointer[,pointer]`) |
 
 #### `quickpat new <spec.yaml>`
 
@@ -240,6 +241,13 @@ secrets:
 
 vault:
   enabled: true
+
+# Only add for specific known ArgoCD sync issues (not a default)
+ignoreDifferences:
+  - group: route.openshift.io
+    kind: Route
+    jsonPointers:
+      - /spec/host
 
 options:
   syncPolicy: Automatic           # Automatic | Manual
@@ -420,7 +428,7 @@ quickpat/
 │   └── config.py       # Config loader (YAML + defaults)
 ├── skills/
 │   └── transform_quickstart.md   # Text skill for any LLM
-├── tests/              # 363 tests
+├── tests/              # 366 tests
 ├── examples/
 │   └── sample-spec.yaml
 ├── docs/

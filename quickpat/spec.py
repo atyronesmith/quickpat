@@ -79,6 +79,21 @@ def validate_spec(spec: dict) -> list:
                         f"must be one of: {sorted(VALID_SECRET_ACTIONS)}"
                     )
 
+    if 'ignoreDifferences' in spec:
+        if not isinstance(spec['ignoreDifferences'], list):
+            errors.append("'ignoreDifferences' must be a list")
+        else:
+            for i, entry in enumerate(spec['ignoreDifferences']):
+                if not isinstance(entry, dict):
+                    errors.append(f"ignoreDifferences[{i}]: must be a mapping")
+                    continue
+                if 'kind' not in entry:
+                    errors.append(f"ignoreDifferences[{i}]: missing 'kind'")
+                if 'jsonPointers' not in entry:
+                    errors.append(f"ignoreDifferences[{i}]: missing 'jsonPointers'")
+                elif not isinstance(entry['jsonPointers'], list):
+                    errors.append(f"ignoreDifferences[{i}]: 'jsonPointers' must be a list")
+
     return errors
 
 
@@ -190,6 +205,12 @@ def build_from_spec(spec: dict, spec_path: str = "") -> tuple:
 
     if secret_config:
         config['secret_config'] = secret_config
+
+    if 'ignoreDifferences' in spec:
+        config['ignore_differences'] = [
+            {k: v for k, v in entry.items()}
+            for entry in spec['ignoreDifferences']
+        ]
 
     global_options = {}
     if 'syncPolicy' in opts:

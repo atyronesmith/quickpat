@@ -260,39 +260,24 @@ class TestTransformRemote:
 
 
 class TestStaticDriftEntries:
-    def test_known_route(self):
+    """KNOWN_IGNORE_RULES is empty by design — ignoreDifferences should be
+    explicitly provided via spec YAML or --ignore-differences, not auto-generated."""
+
+    def test_no_auto_drift_for_routes(self):
         entries = _static_drift_entries([("route.openshift.io", "Route")])
-        assert len(entries) == 1
-        assert entries[0].kind == "Route"
-        assert "/spec/host" in entries[0].json_pointers
-
-    def test_known_notebook(self):
-        entries = _static_drift_entries([("kubeflow.org", "Notebook")])
-        assert len(entries) == 1
-        assert "/spec" in entries[0].json_pointers
-        assert "/metadata/annotations" in entries[0].json_pointers
-
-    def test_known_dspa(self):
-        entries = _static_drift_entries([
-            ("datasciencepipelinesapplications.opendatahub.io",
-             "DataSciencePipelinesApplication"),
-        ])
-        assert len(entries) == 1
-        assert "/spec" in entries[0].json_pointers
-
-    def test_unknown_type_returns_nothing(self):
-        entries = _static_drift_entries([("apps", "Deployment")])
         assert entries == []
 
-    def test_mixed_known_and_unknown(self):
+    def test_no_auto_drift_for_notebooks(self):
+        entries = _static_drift_entries([("kubeflow.org", "Notebook")])
+        assert entries == []
+
+    def test_no_auto_drift_for_any_type(self):
         entries = _static_drift_entries([
             ("route.openshift.io", "Route"),
             ("apps", "Deployment"),
             ("kubeflow.org", "Notebook"),
         ])
-        assert len(entries) == 2
-        kinds = {e.kind for e in entries}
-        assert kinds == {"Route", "Notebook"}
+        assert entries == []
 
     def test_empty_input(self):
         assert _static_drift_entries([]) == []
