@@ -191,6 +191,48 @@ class TestNewConfigKeys:
             data = yaml.safe_load(f)
         assert data["tier"] == "sandbox"
 
+    def test_metadata_has_provenance(self, single_chart_quickstart, tmp_path):
+        out, _, _ = _generate(single_chart_quickstart, tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "pattern-metadata.yaml") as f:
+            data = yaml.safe_load(f)
+        assert data["metadata_version"] == "2.0"
+        qp = data["quickpat"]
+        assert "version" in qp
+        assert "generated" in qp
+        assert "strategy" in qp
+        assert isinstance(qp["vault"], bool)
+
+    def test_metadata_provenance_with_remote(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "pattern-metadata.yaml") as f:
+            data = yaml.safe_load(f)
+        qp = data["quickpat"]
+        assert qp["strategy"] == "remote"
+        assert qp["vault"] is True
+        assert qp["source"]["repo"] == "https://github.com/rh-ai-quickstart/RAG"
+        assert qp["source"]["branch"] == "main"
+        assert "secret_groups" in qp
+        assert "pgvector" in qp["secret_groups"]
+
+    def test_metadata_provenance_includes_operators(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path, operators=["openshift-ai", "nvidia-gpu"])
+        from pathlib import Path
+        with open(Path(out) / "pattern-metadata.yaml") as f:
+            data = yaml.safe_load(f)
+        assert "nvidia-gpu" in data["quickpat"]["operators"]
+        assert "openshift-ai" in data["quickpat"]["operators"]
+
+    def test_metadata_provenance_records_ignore_differences(self, tmp_path):
+        ignore = [{"group": "route.openshift.io", "kind": "Route",
+                   "jsonPointers": ["/spec/host"]}]
+        out, _, _ = _remote_config(tmp_path, ignore_differences=ignore)
+        from pathlib import Path
+        with open(Path(out) / "pattern-metadata.yaml") as f:
+            data = yaml.safe_load(f)
+        assert data["quickpat"]["ignore_differences"] == ignore
+
     def test_global_single_argocd(self, single_chart_quickstart, tmp_path):
         out, _, _ = _generate(single_chart_quickstart, tmp_path)
         from pathlib import Path

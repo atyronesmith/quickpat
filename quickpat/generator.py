@@ -2,10 +2,12 @@
 
 import re
 import shutil
+from datetime import date, timezone
 from pathlib import Path
 
 import yaml
 
+from . import __version__
 from .analyzer import QuickstartAnalysis, ChartInfo
 from .config import get as cfg
 from .operators import OPERATORS, INFRA_CHARTS
@@ -603,13 +605,45 @@ podman run -it --rm --pull=newer \
         display_name = pattern_name.replace('-', ' ').title()
 
         data = {
-            'metadata_version': '1.0',
+            'metadata_version': '2.0',
             'name': pattern_name,
             'pattern_version': '1.0',
             'display_name': display_name,
             'tier': self.config.get('tier', 'sandbox'),
+            'quickpat': self._build_provenance(),
         }
         self._write_yaml(self.output_dir / 'pattern-metadata.yaml', data)
+
+    def _build_provenance(self):
+        """Build generation provenance for pattern-metadata.yaml."""
+        prov = {
+            'version': __version__,
+            'generated': str(date.today()),
+            'strategy': self.config.get('chart_strategy', 'local'),
+            'vault': bool(self.config.get('use_vault')),
+        }
+
+        source_url = self.config.get('git_repo_url')
+        if source_url:
+            prov['source'] = {
+                'repo': source_url,
+                'path': self.config.get('chart_path_in_repo', ''),
+                'branch': self.config.get('chart_branch', 'main'),
+            }
+
+        ops = self.config.get('operators', [])
+        if ops:
+            prov['operators'] = sorted(ops)
+
+        sg = self.config.get('secret_groups', {})
+        if sg:
+            prov['secret_groups'] = sorted(sg.keys())
+
+        ig = self.config.get('ignore_differences')
+        if ig:
+            prov['ignore_differences'] = ig
+
+        return prov
 
     # ── ansible.cfg ─────────────────────────────────────────────────
 
