@@ -313,10 +313,10 @@ def _make_valid_remote_pattern(path):
                         "name": "vault", "namespace": "vault", "project": "prod",
                         "chart": "hashicorp-vault", "chartVersion": "0.1.*",
                     },
-                    "golang-external-secrets": {
-                        "name": "golang-external-secrets",
-                        "namespace": "golang-external-secrets", "project": "prod",
-                        "chart": "golang-external-secrets", "chartVersion": "0.2.*",
+                    "openshift-external-secrets": {
+                        "name": "openshift-external-secrets",
+                        "namespace": "external-secrets", "project": "prod",
+                        "chart": "openshift-external-secrets", "chartVersion": "0.0.*",
                     },
                     "rag-quickstart": {
                         "name": "rag-quickstart", "namespace": "rag", "project": "prod",
@@ -425,6 +425,22 @@ class TestRemoteStrategyValidation:
             }, f)
         result = validate(str(pat))
         assert any("v1beta1" in i.message for i in result.issues)
+
+    def test_warns_on_golang_external_secrets(self, tmp_path):
+        pat = tmp_path / "pattern"
+        _make_valid_remote_pattern(pat)
+        with open(pat / "values-prod.yaml") as f:
+            data = yaml.safe_load(f)
+        apps = data["clusterGroup"]["applications"]
+        apps["golang-external-secrets"] = {
+            "name": "golang-external-secrets",
+            "namespace": "golang-external-secrets", "project": "prod",
+            "chart": "golang-external-secrets", "chartVersion": "0.2.*",
+        }
+        with open(pat / "values-prod.yaml", "w") as f:
+            yaml.dump(data, f)
+        result = validate(str(pat))
+        assert any("golang-external-secrets is deprecated" in i.message for i in result.issues)
 
 
 class TestSkillMdConformanceChecks:

@@ -428,7 +428,7 @@ quickpat/
 │   └── config.py       # Config loader (YAML + defaults)
 ├── skills/
 │   └── transform_quickstart.md   # Text skill for any LLM
-├── tests/              # 370 tests
+├── tests/              # 374 tests
 ├── examples/
 │   └── sample-spec.yaml
 ├── docs/

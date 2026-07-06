@@ -252,6 +252,28 @@ class TestNewConfigKeys:
         assert (Path(out) / "values-factory.yaml").exists()
         assert not (Path(out) / "values-prod.yaml").exists()
 
+    def test_shared_value_files_in_values_prod(self, single_chart_quickstart, tmp_path):
+        out, _, _ = _generate(single_chart_quickstart, tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "values-prod.yaml") as f:
+            data = yaml.safe_load(f)
+        svf = data["clusterGroup"]["sharedValueFiles"]
+        assert svf == ["/overrides/values-{{ $.Values.global.clusterPlatform }}.yaml"]
+
+    def test_provenance_records_configured_strategy(self, single_chart_quickstart, tmp_path):
+        out, _, _ = _generate(single_chart_quickstart, tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "pattern-metadata.yaml") as f:
+            data = yaml.safe_load(f)
+        assert data["quickpat"]["strategy"] == "local"
+
+    def test_provenance_strategy_default_is_remote(self, tmp_path):
+        out, _, _ = _remote_config(tmp_path)
+        from pathlib import Path
+        with open(Path(out) / "pattern-metadata.yaml") as f:
+            data = yaml.safe_load(f)
+        assert data["quickpat"]["strategy"] == "remote"
+
     def test_secret_config_skip(self, single_chart_quickstart, tmp_path):
         out, _, _ = _generate(single_chart_quickstart, tmp_path,
                               secret_config={"password": "skip"})

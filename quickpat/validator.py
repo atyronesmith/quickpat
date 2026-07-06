@@ -216,7 +216,7 @@ def _check_values_hub(out: Path, config: dict = None) -> list:
 
     apps = cg.get("applications", {})
 
-    for infra_app in ("vault", "openshift-external-secrets", "golang-external-secrets"):
+    for infra_app in ("vault", "openshift-external-secrets"):
         if infra_app in apps:
             app = apps[infra_app]
             if "path" in app and "chart" not in app:
@@ -225,6 +225,12 @@ def _check_values_hub(out: Path, config: dict = None) -> list:
                     f"Infrastructure app '{infra_app}' uses path: but should use chart: + chartVersion:",
                     auto_fixable=True,
                 ))
+
+    if "golang-external-secrets" in apps:
+        issues.append(Issue(
+            hub_file, "warning",
+            "golang-external-secrets is deprecated; migrate to openshift-external-secrets (Red Hat supported, channel stable-v1)",
+        ))
 
     for app_name, app in apps.items():
         if app_name in ("vault", "openshift-external-secrets", "golang-external-secrets"):
@@ -509,7 +515,6 @@ def _check_remote_strategy(out: Path, apps: dict, values_file: str = "values-pro
     if not remote_apps:
         return issues
 
-    # Secrets chart (named {app}-secrets) must exist if declared
     infra_apps = {"vault", "openshift-external-secrets", "golang-external-secrets"}
     secrets_apps = [name for name in apps if name.endswith("-secrets") and name not in infra_apps]
     for secrets_app in secrets_apps:

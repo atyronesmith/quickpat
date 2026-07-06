@@ -102,14 +102,16 @@ class PatternGenerator:
         )
 
         group_name = self.config.get('cluster_group_name', 'prod')
-        data = {
-            'clusterGroup': {
-                'name': group_name,
-                'namespaces': namespaces,
-                'subscriptions': subscriptions,
-                'applications': applications,
-            }
+        cg = {
+            'name': group_name,
+            'sharedValueFiles': [
+                '/overrides/values-{{ $.Values.global.clusterPlatform }}.yaml',
+            ],
+            'namespaces': namespaces,
+            'subscriptions': subscriptions,
+            'applications': applications,
         }
+        data = {'clusterGroup': cg}
         self._write_yaml(
             self.output_dir / f'values-{group_name}.yaml', data
         )
@@ -619,7 +621,7 @@ podman run -it --rm --pull=newer \
         prov = {
             'version': __version__,
             'generated': str(date.today()),
-            'strategy': self.config.get('chart_strategy', 'local'),
+            'strategy': self.config.get('chart_strategy', 'remote'),
             'vault': bool(self.config.get('use_vault')),
         }
 
