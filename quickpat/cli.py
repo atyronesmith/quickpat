@@ -936,10 +936,12 @@ def cmd_validate(args):
 
 def _print_transform_result(result: TransformResult):
     if result.success:
-        print(f"\nPattern generated: {result.pattern_dir}/")
-        print(f"Files: {len(result.files_created)}")
-        for f in result.files_created:
-            print(f"  {f}")
+        output_dir = result.pattern_dir
+        generated_files = list(result.files_created)
+        print(f"\nPattern generated: {output_dir}/")
+        print(f"Files: {len(generated_files)}")
+        for filepath in generated_files:
+            print(f"  {filepath}")
         if result.llm_decisions:
             print("\nLLM decisions:")
             for d in result.llm_decisions:

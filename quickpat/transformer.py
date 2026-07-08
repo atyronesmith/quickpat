@@ -145,8 +145,8 @@ def _externalize_secrets(
     for group_name, group_secrets in groups.items():
         es_file = templates_dir / f'external-secret-{group_name}.yaml'
         if not es_file.exists():
-            content = _render_external_secret(prefix, group_name, group_secrets)
-            es_file.write_text(content)
+            template_content = _render_external_secret(prefix, group_name)
+            es_file.write_text(template_content)
             result.files_created.append(f'templates/external-secret-{group_name}.yaml')
 
     # 3. Rewrite deployment templates to use secretKeyRef
@@ -201,7 +201,7 @@ def _add_secret_store_config(values_file: Path):
 
 
 def _render_external_secret(
-    prefix: str, group_name: str, secrets: list,
+    prefix: str, group_name: str,
 ) -> str:
     """Generate an ExternalSecret CRD template for a secret group."""
     return (

@@ -539,7 +539,7 @@ def _check_remote_strategy(out: Path, apps: dict, values_file: str = "values-pro
                     if not data:
                         continue
                     api_ver = data.get("apiVersion", "")
-                    if "external-secrets.io" in api_ver and api_ver != "external-secrets.io/v1":
+                    if api_ver.startswith("external-secrets.io/") and api_ver != "external-secrets.io/v1":
                         issues.append(Issue(
                             f"{chart_path}/templates/{tmpl.name}", "warning",
                             f"ExternalSecret uses {api_ver} — recommend external-secrets.io/v1",
