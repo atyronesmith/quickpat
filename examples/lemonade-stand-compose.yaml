@@ -1,0 +1,163 @@
+apiVersion: supplychain/v1alpha1
+kind: ApplicationSpec
+metadata:
+  name: lemonade-stand
+  description: LLM guardrails demo with TrustyAI orchestration
+  tier: sandbox
+  upstream:
+    repo: https://github.com/rh-ai-quickstart/lemonade-stand-assistant.git
+    path: chart
+    branch: main
+
+# Building blocks — each block type encodes the shared infrastructure
+# knowledge for that capability. The compiler maps these to operator
+# subscriptions, namespaces, and ArgoCD applications automatically.
+blocks:
+
+  platform:
+    type: ai-platform-foundation
+    config:
+      dsc:
+        kserve: Managed
+        dashboard: Managed
+        trustyai: Managed          # required for GuardrailsOrchestrator
+        modelmeshserving: Managed
+        datasciencepipelines: Removed
+        kueue: Removed
+        ray: Removed
+        trainingoperator: Removed
+        workbenches: Removed
+
+  gpu:
+    type: gpu-compute
+    config:
+      mig_strategy: single
+      dcgm: true
+
+  llm:
+    type: model-serving
+    profile: llm-inference         # sets gpu: true, runtime: vllm defaults
+    config:
+      model: meta-llama/Llama-3.2-3B-Instruct
+      runtime: vllm
+      gpu: true
+      replicas: { min: 0, max: 1 }
+      resources:
+        requests: { cpu: 1, memory: 8Gi, gpu: 1 }
+        limits:   { cpu: 4, memory: 20Gi, gpu: 1 }
+      storage:
+        type: oci
+        uri: oci://quay.io/redhat-ai-services/modelcar-catalog:llama-3.2-3b-instruct
+    secrets:
+      vllm-api-key:
+        vault_path: lemonade-stand
+        generate: false
+
+  hap-detector:
+    type: model-serving
+    config:
+      model: ibm-granite/granite-guardian-hap-125m
+      runtime: custom
+      image: quay.io/trustyai/guardrails-detector-huggingface-runtime:latest
+      gpu: false
+      resources:
+        requests: { cpu: 1, memory: 4Gi }
+        limits:   { cpu: 2, memory: 8Gi }
+      storage:
+        type: s3
+        connection: "{{ blocks.model-storage.output.connection_name }}"
+        path: granite-guardian-hap-125m
+
+  prompt-injection-detector:
+    type: model-serving
+    config:
+      model: protectai/deberta-v3-base-prompt-injection-v2
+      runtime: custom
+      image: quay.io/trustyai/guardrails-detector-huggingface-runtime:latest
+      gpu: false
+      resources:
+        requests: { cpu: 4, memory: 16Gi }
+        limits:   { cpu: 8, memory: 24Gi }
+      storage:
+        type: s3
+        connection: "{{ blocks.model-storage.output.connection_name }}"
+        path: deberta-v3-base-prompt-injection-v2
+
+  model-storage:
+    type: object-storage
+    config:
+      provider: minio
+      storage: 50Gi
+      init_models:
+        - ibm-granite/granite-guardian-hap-125m
+        - protectai/deberta-v3-base-prompt-injection-v2
+    secrets:
+      access-key:
+        vault_path: lemonade-stand/minio
+        key: AWS_ACCESS_KEY_ID
+        generate: false
+      secret-key:
+        vault_path: lemonade-stand/minio
+        key: AWS_SECRET_ACCESS_KEY
+        generate: false
+
+  guardrails:
+    type: guardrails-orchestrator
+    config:
+      enable_built_in_detectors: true
+      otel_protocol: grpc
+      detectors:
+        hap:
+          endpoint: "{{ blocks.hap-detector.output.predictor_host }}"
+          port: 8000
+        prompt_injection:
+          endpoint: "{{ blocks.prompt-injection-detector.output.predictor_host }}"
+          port: 8000
+      llm:
+        endpoint: "{{ blocks.llm.output.predictor_host }}"
+
+wiring:
+  - from: guardrails
+    to: llm
+    via: chat-generation
+  - from: model-storage
+    to: hap-detector
+    via: model-weights
+  - from: model-storage
+    to: prompt-injection-detector
+    via: model-weights
+
+custom:
+  lemonade-stand-app:
+    source:
+      image: quay.io/ckavili/lemon-fastapi:1.0.26
+    replicas: 1
+    ports:
+      - name: http
+        port: 8080
+        route: true
+    env:
+      GUARDRAILS_ORCHESTRATOR_SERVICE_SERVICE_HOST: "{{ blocks.guardrails.output.service_host }}"
+      VLLM_MODEL: "{{ blocks.llm.config.model }}"
+
+  chunker-service:
+    source:
+      image: quay.io/rh-ee-mmisiura/chunkers:v2.0
+    ports:
+      - { name: grpc, port: 8085 }
+
+  lingua-detector:
+    source:
+      image: quay.io/ckavili/lingua-language-detector:0.0.25
+    ports:
+      - { name: http, port: 8080 }
+
+  shiny-dashboard:
+    source:
+      image: quay.io/sara_banderby/shinydashboard:fedora
+    ports:
+      - name: http
+        port: 3838
+        route: true
+    env:
+      METRICS_URL: "{{ custom.lemonade-stand-app.endpoint }}/metrics"

@@ -18,6 +18,7 @@ from .profile import (
     compute_fingerprint, diff_profile,
 )
 from .providers.base import Provider
+from .compose import load_application_spec, compile_spec, AppSpecError, ComposeError
 from .spec import load_spec, build_from_spec, SpecError
 from .subchart import fetch_and_analyze_subcharts
 from .validator import validate_and_fix, validate, ValidationResult
@@ -288,6 +289,66 @@ def create_from_spec(
 
     result.files_created = _list_created_files(output_dir, config)
 
+    return result
+
+
+# ── Compose from ApplicationSpec ────────────────────────────────────
+
+
+def compose_from_spec(
+    spec_path: str,
+    output_dir: str = None,
+    pattern_name: str = None,
+    auto_fix: bool = True,
+    max_fix_iterations: int = 3,
+) -> TransformResult:
+    """Compile an ApplicationSpec YAML into a Validated Pattern directory.
+
+    When output_dir is not specified, writes into vp-out/ inside the same
+    directory as spec_path (the application repo). This keeps the VP output
+    co-located with the source so ArgoCD can watch a single repo.
+    """
+    result = TransformResult(success=False)
+
+    try:
+        spec = load_application_spec(spec_path)
+    except AppSpecError as e:
+        result.warnings.append(str(e))
+        return result
+
+    spec_dir = str(Path(spec_path).resolve().parent)
+    if not output_dir:
+        output_dir = str(Path(spec_dir) / 'vp-out')
+    if pattern_name:
+        spec.name = pattern_name
+
+    try:
+        analysis, config = compile_spec(spec, output_dir, spec_dir=spec_dir)
+    except ComposeError as e:
+        result.warnings.append(str(e))
+        return result
+
+    result.pattern_dir = output_dir
+    result.analysis = analysis
+    result.config = config
+
+    skill_generate(analysis, config)
+
+    if auto_fix:
+        val_result = validate_and_fix(
+            output_dir, config, max_iterations=max_fix_iterations,
+        )
+    else:
+        val_result = validate(output_dir, config)
+
+    result.validation = val_result
+    result.success = True
+
+    for issue in val_result.issues:
+        if not issue.fix_applied:
+            result.warnings.append(f"[{issue.severity}] {issue.file}: {issue.message}")
+
+    result.files_created = _list_created_files(output_dir, config)
     return result
 
 

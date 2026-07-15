@@ -12,7 +12,7 @@ from .config import get as cfg
 from .generator import build_report
 from .providers import make_provider
 from .operators import OPERATORS
-from .pipeline import transform, transform_remote, skill_analyze, create_from_spec, TransformResult
+from .pipeline import transform, transform_remote, skill_analyze, create_from_spec, compose_from_spec, TransformResult
 from .profile import load_profile
 from .readiness import check_readiness
 from .registry import (
@@ -106,6 +106,19 @@ def main():
         help='Use defaults, skip interactive prompts',
     )
 
+    # compose subcommand
+    compose_p = subparsers.add_parser(
+        'compose',
+        help='Compile an ApplicationSpec (blocks-based) into a Validated Pattern',
+    )
+    compose_p.add_argument('spec', help='Path to ApplicationSpec YAML file')
+    compose_p.add_argument('--output', '-o', help='Output directory')
+    compose_p.add_argument('--name', help='Pattern name override')
+    compose_p.add_argument(
+        '--no-fix', action='store_true',
+        help='Skip auto-fix validation pass',
+    )
+
     # batch subcommand
     batch_p = subparsers.add_parser(
         'batch', help='Transform all registered quickstarts'
@@ -159,7 +172,9 @@ def main():
 
     args = parser.parse_args()
 
-    if args.command == 'list':
+    if args.command == 'compose':
+        cmd_compose(args)
+    elif args.command == 'list':
         cmd_list()
     elif args.command == 'analyze':
         cmd_analyze(args)
@@ -368,6 +383,38 @@ def cmd_new(args):
 
     if result.success:
         _print_transform_result(result)
+    else:
+        for w in result.warnings:
+            print(f"Error: {w}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_compose(args):
+    """Compile an ApplicationSpec into a Validated Pattern."""
+    print("=== QuickPat Compose: ApplicationSpec -> Validated Pattern ===\n")
+
+    # When --output is omitted, compose writes into vp-out/ next to spec.yaml.
+    # Pass None so pipeline.compose_from_spec applies the default.
+    output_dir = args.output or None
+
+    if not output_dir:
+        resolved = str(Path(args.spec).resolve().parent / 'vp-out')
+        print(f"Output: {resolved} (application repo, default)\n")
+
+    result = compose_from_spec(
+        spec_path=args.spec,
+        output_dir=output_dir,
+        pattern_name=args.name,
+        auto_fix=not args.no_fix,
+    )
+
+    if result.success:
+        _print_transform_result(result)
+        if result.config:
+            gn = result.config.get('cluster_group_name', 'prod')
+            blocks = result.config.get('_block_configs', {})
+            if blocks:
+                print(f"\nBlocks compiled: {', '.join(blocks)}")
     else:
         for w in result.warnings:
             print(f"Error: {w}", file=sys.stderr)

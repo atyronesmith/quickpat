@@ -93,6 +93,14 @@ quickpat create RAG --llm openai
 quickpat new spec.yaml -o /tmp/my-pattern
 ```
 
+### Compile a Composition Spec (blocks-based authoring)
+
+```bash
+quickpat compose my-app-spec.yaml -o /tmp/my-pattern
+```
+
+See `examples/lemonade-stand-compose.yaml` for a complete example and [docs/compose-tutorial.md](docs/compose-tutorial.md) for a full walkthrough.
+
 ### Deploy
 
 ```bash
@@ -175,6 +183,19 @@ Create a Validated Pattern from a declarative spec YAML — no quickstart source
 | `--output, -o DIR` | Output directory |
 | `--name NAME` | Pattern name override |
 | `--non-interactive` | Use defaults, skip prompts |
+
+#### `quickpat compose <spec.yaml>`
+
+Compile a composition spec (blocks-based ApplicationSpec) into a Validated Pattern directory. Unlike `quickpat new`, `compose` uses typed building blocks — each block encodes shared infrastructure knowledge (operator dependencies, namespace config, local chart templates) so you declare *what* the application needs rather than *how* to wire it.
+
+| Option | Description |
+|--------|-------------|
+| `spec` | Path to ApplicationSpec YAML file |
+| `--output, -o DIR` | Output directory |
+| `--name NAME` | Pattern name override |
+| `--no-fix` | Skip auto-fix validation pass |
+
+See [docs/compose-tutorial.md](docs/compose-tutorial.md) for a complete walkthrough using the lemonade-stand quickstart.
 
 #### `quickpat batch`
 
@@ -418,6 +439,10 @@ quickpat/
 │   ├── validator.py    # Pattern validation + auto-fix loop
 │   ├── pipeline.py     # Orchestration: analyze -> detect -> generate -> validate
 │   ├── spec.py         # Spec YAML loader for `quickpat new`
+│   ├── compose/        # Composition spec compiler for `quickpat compose`
+│   │   ├── parser.py   # ApplicationSpec dataclasses + YAML loader
+│   │   ├── blocks.py   # Block type registry (8 types → operators)
+│   │   └── compiler.py # Spec → (analysis, config) for PatternGenerator
 │   ├── readiness.py    # Publication readiness checks
 │   ├── operators.py    # Operator registry with detection indicators
 │   ├── registry.py     # ai-quickstart-pub registry + shared chart index

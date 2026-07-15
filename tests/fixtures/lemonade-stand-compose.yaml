@@ -1,0 +1,265 @@
+# Lemonade-Stand Composition Spec — Phase 0 Validation
+#
+# Hand-written spec defining the lemonade-stand quickstart using
+# composable building blocks. This is the input artifact for Phase 0:
+# we manually derive the VP artifacts this spec implies, then compare
+# against Drew's hand-crafted VP at validatedpatterns-sandbox/ai-quickstart-lemonade-stand.
+#
+# Upstream QS: rh-ai-quickstart/lemonade-stand-assistant
+# Drew's VP:   validatedpatterns-sandbox/ai-quickstart-lemonade-stand
+# Date:        2026-07-09
+
+apiVersion: supplychain/v1alpha1
+kind: ApplicationSpec
+metadata:
+  name: lemonade-stand
+  description: >-
+    LLM guardrails demo with TrustyAI orchestration.
+    Guardrailed chat assistant that only discusses lemons,
+    with HAP detection, prompt injection detection, and
+    language filtering.
+  tier: sandbox
+  upstream:
+    repo: https://github.com/rh-ai-quickstart/lemonade-stand-assistant.git
+    path: chart
+    branch: main
+
+# ── Building Blocks ──────────────────────────────────────────────────
+
+blocks:
+
+  # OpenShift AI + dependent operators
+  platform:
+    type: ai-platform-foundation
+    config:
+      dsc:
+        kserve: Managed
+        dashboard: Managed
+        trustyai: Managed
+        modelmeshserving: Managed     # codeflare left at default (empty = Managed)
+        datasciencepipelines: Removed
+        kueue: Removed
+        ray: Removed
+        trainingoperator: Removed
+        workbenches: Removed
+
+  # NFD + NVIDIA GPU Operator + ClusterPolicy
+  gpu:
+    type: gpu-compute
+    config:
+      mig_strategy: single
+      vgpu_manager: false
+      dcgm: true
+      driver:
+        upgrade_policy: { auto_upgrade: true }
+
+  # ── Model Serving ────────────────────────────────────────────────
+
+  # Primary chat LLM
+  llm:
+    type: model-serving
+    profile: llm-inference
+    config:
+      model: meta-llama/Llama-3.2-3B-Instruct
+      runtime: vllm
+      image: quay.io/modh/vllm:rhoai-2.19-cuda
+      gpu: true
+      replicas:
+        min: 0
+        max: 1
+      resources:
+        requests: { cpu: 1, memory: 8Gi, gpu: 1 }
+        limits:   { cpu: 4, memory: 20Gi, gpu: 1 }
+      vllm_args:
+        dtype: half
+        gpu_memory_utilization: "0.95"
+        max_model_len: 4096
+        max_num_seqs: 384
+      storage:
+        type: oci
+        uri: oci://quay.io/redhat-ai-services/modelcar-catalog:llama-3.2-3b-instruct
+    secrets:
+      vllm-api-key:
+        vault_path: lemonade-stand
+        generate: false
+
+  # HAP (Hate, Abuse, Profanity) detector
+  hap-detector:
+    type: model-serving
+    config:
+      model: ibm-granite/granite-guardian-hap-125m
+      runtime: custom
+      image: quay.io/trustyai/guardrails-detector-huggingface-runtime:latest
+      gpu: false
+      replicas:
+        min: 1
+        max: 1
+      resources:
+        requests: { cpu: 1, memory: 4Gi }
+        limits:   { cpu: 2, memory: 8Gi }
+      storage:
+        type: s3
+        connection: "{{ blocks.model-storage.output.connection_name }}"
+        path: granite-guardian-hap-125m
+
+  # Prompt injection detector
+  prompt-injection-detector:
+    type: model-serving
+    config:
+      model: protectai/deberta-v3-base-prompt-injection-v2
+      runtime: custom
+      image: quay.io/trustyai/guardrails-detector-huggingface-runtime:latest
+      gpu: false
+      replicas:
+        min: 1
+        max: 1
+      resources:
+        requests: { cpu: 4, memory: 16Gi }
+        limits:   { cpu: 8, memory: 24Gi }
+      storage:
+        type: s3
+        connection: "{{ blocks.model-storage.output.connection_name }}"
+        path: deberta-v3-base-prompt-injection-v2
+
+  # ── Object Storage ───────────────────────────────────────────────
+
+  # MinIO for detector model weights
+  model-storage:
+    type: object-storage
+    config:
+      provider: minio
+      storage: 50Gi
+      init_models:
+        - ibm-granite/granite-guardian-hap-125m
+        - protectai/deberta-v3-base-prompt-injection-v2
+    secrets:
+      access-key:
+        vault_path: lemonade-stand/minio
+        key: AWS_ACCESS_KEY_ID
+      secret-key:
+        vault_path: lemonade-stand/minio
+        key: AWS_SECRET_ACCESS_KEY
+
+  # ── Guardrails ───────────────────────────────────────────────────
+
+  guardrails:
+    type: guardrails-orchestrator
+    config:
+      enable_built_in_detectors: true
+      enable_guardrails_gateway: false
+      otel_protocol: grpc
+      detectors:
+        hap:
+          endpoint: "{{ blocks.hap-detector.output.predictor_host }}"
+          port: 8000
+        prompt_injection:
+          endpoint: "{{ blocks.prompt-injection-detector.output.predictor_host }}"
+          port: 8000
+      chunker:
+        endpoint: "{{ custom.chunker-service.endpoint }}"
+        port: 8085
+      language_detector:
+        endpoint: "{{ custom.lingua-detector.endpoint }}"
+        port: 8080
+      llm:
+        endpoint: "{{ blocks.llm.output.predictor_host }}"
+
+# ── Wiring ─────────────────────────────────────────────────────────
+# Declares data flow between blocks. The compiler uses these to
+# validate connectivity and generate service references.
+
+wiring:
+  - from: guardrails
+    to: llm
+    via: chat-generation
+  - from: model-storage
+    to: hap-detector
+    via: model-weights
+  - from: model-storage
+    to: prompt-injection-detector
+    via: model-weights
+
+# ── Custom Components ──────────────────────────────────────────────
+# These are the application's unique value — not blockifiable.
+
+custom:
+  lemonade-stand-app:
+    description: FastAPI chat frontend with lemon-only scope
+    source:
+      image: quay.io/ckavili/lemon-fastapi:1.0.26
+    replicas: 1
+    ports:
+      - name: http
+        port: 8080
+        route: true
+        tls: { termination: edge }
+    env:
+      GUARDRAILS_ORCHESTRATOR_SERVICE_SERVICE_HOST: "{{ blocks.guardrails.output.service_host }}"
+      GUARDRAILS_ORCHESTRATOR_SERVICE_SERVICE_PORT: "8032"
+      VLLM_MODEL: "{{ blocks.llm.config.model | default 'llama32' }}"
+      VLLM_API_KEY: "{{ blocks.llm.secrets.vllm-api-key }}"
+    volumes:
+      - name: system-prompt
+        configMap: lemonade-stand-system-prompt
+        mountPath: /system-prompt
+    probes:
+      liveness:  { path: /health, port: 8080 }
+      readiness: { path: /health, port: 8080 }
+    resources:
+      requests: { cpu: 1, memory: 1Gi }
+      limits:   { cpu: 2, memory: 2Gi }
+    monitor:
+      path: /metrics
+      port: http
+      interval: 3s
+
+  chunker-service:
+    description: Text chunking microservice for guardrails
+    source:
+      image: quay.io/rh-ee-mmisiura/chunkers:v2.0
+    replicas: 1
+    ports:
+      - name: grpc
+        port: 8085
+    resources:
+      requests: { cpu: 1, memory: 1Gi }
+      limits:   { cpu: 2, memory: 2Gi }
+
+  lingua-detector:
+    description: Language detection (English-only filter)
+    source:
+      image: quay.io/ckavili/lingua-language-detector:0.0.25
+    replicas: 1
+    ports:
+      - name: http
+        port: 8080
+    probes:
+      liveness:  { path: /health, port: 8080 }
+      readiness: { path: /health, port: 8080 }
+    resources:
+      requests: { cpu: 1, memory: 2Gi }
+      limits:   { cpu: 2, memory: 3Gi }
+
+  shiny-dashboard:
+    description: R Shiny monitoring dashboard
+    source:
+      image: quay.io/sara_banderby/shinydashboard:fedora
+    replicas: 1
+    ports:
+      - name: http
+        port: 3838
+        route: true
+        tls: { termination: edge }
+    env:
+      METRICS_URL: "{{ custom.lemonade-stand-app.endpoint }}/metrics"
+      REFRESH_INTERVAL: "1"
+    resources:
+      requests: { cpu: 250m, memory: 512Mi }
+      limits:   { cpu: 500m, memory: 1Gi }
+
+  guardrails-config:
+    description: Auxiliary image references for TrustyAI
+    type: configmap
+    data:
+      regexDetectorImage: quay.io/trustyai/regex-detector:latest
+      vllmGatewayImage: quay.io/trustyai/vllm-orchestrator-gateway:latest

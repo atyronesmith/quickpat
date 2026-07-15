@@ -37,6 +37,7 @@ class PatternGenerator:
         self._generate_gitignore()
         self._generate_overrides()
         self._generate_infra_charts()
+        self._generate_custom_component_stubs()
         if self.config.get('generate_crc_scripts', False):
             self._generate_scripts()
         self._generate_readme()
@@ -296,6 +297,18 @@ class PatternGenerator:
                 'namespace': app_namespace,
                 'project': group_name,
                 'path': f'charts/{secrets_chart_name}',
+            }
+
+        # Custom component stubs — one ArgoCD app per component, pointing at
+        # charts/<comp-name>/ which _generate_custom_component_stubs creates.
+        custom_components = self.config.get('custom_components', {})
+        comp_namespace = self.config.get('app_namespace', self.analysis.name)
+        for comp_name in custom_components:
+            applications[comp_name] = {
+                'name': comp_name,
+                'namespace': comp_namespace,
+                'project': group_name,
+                'path': f'charts/{comp_name}',
             }
 
         return applications
@@ -693,8 +706,41 @@ podman run -it --rm --pull=newer \
 
     # ── Infrastructure charts (operator CRs) ─────────────────────────
 
+    def _apply_dsc_overrides(self, cr: dict, dsc_config: dict) -> dict:
+        """Apply ai-platform-foundation block DSC component states to a CR dict."""
+        if not dsc_config:
+            return cr
+        components = cr['spec']['components']
+        for comp_name, state in dsc_config.items():
+            if comp_name in components:
+                components[comp_name]['managementState'] = state
+            else:
+                components[comp_name] = {'managementState': state}
+        return cr
+
+    def _apply_gpu_overrides(self, cr: dict, gpu_config: dict) -> dict:
+        """Apply gpu-compute block config to a ClusterPolicy CR dict."""
+        if not gpu_config:
+            return cr
+        spec = cr['spec']
+        if 'mig_strategy' in gpu_config:
+            spec['mig']['strategy'] = gpu_config['mig_strategy']
+        if 'dcgm' in gpu_config:
+            spec['dcgmExporter']['enabled'] = bool(gpu_config['dcgm'])
+        if 'vgpu_manager' in gpu_config:
+            spec['vgpuManager']['enabled'] = bool(gpu_config['vgpu_manager'])
+        driver_cfg = gpu_config.get('driver', {})
+        up = driver_cfg.get('upgrade_policy', {})
+        if 'auto_upgrade' in up:
+            spec['driver']['upgradePolicy']['autoUpgrade'] = bool(up['auto_upgrade'])
+        return cr
+
     def _generate_infra_charts(self):
+        import copy
         operators = self.config.get('operators', [])
+        dsc_config = self.config.get('dsc_config', {})
+        gpu_config = self.config.get('gpu_config', {})
+
         for op_key in operators:
             if op_key not in INFRA_CHARTS:
                 continue
@@ -715,10 +761,71 @@ podman run -it --rm --pull=newer \
                 'global': {'pattern': ''},
             })
 
-            self._write_yaml(
-                tmpl_dir / ic['template_name'],
-                ic['cr'],
-            )
+            cr = copy.deepcopy(ic['cr'])
+            if op_key == 'openshift-ai':
+                cr = self._apply_dsc_overrides(cr, dsc_config)
+            elif op_key == 'nvidia-gpu':
+                cr = self._apply_gpu_overrides(cr, gpu_config)
+
+            self._write_yaml(tmpl_dir / ic['template_name'], cr)
+
+    def _generate_custom_component_stubs(self):
+        """Generate or copy charts for custom: components.
+
+        If a hand-written chart exists in the application repo (detected via
+        existing_custom_charts), copy it into the VP output. Otherwise generate
+        a stub with documented values.yaml so the implementer knows what to fill in.
+        """
+        custom_components = self.config.get('custom_components', {})
+        if not custom_components:
+            return
+
+        existing = self.config.get('existing_custom_charts', set())
+        spec_dir = self.config.get('spec_dir')
+
+        for comp_name, comp in custom_components.items():
+            chart_dst = self.output_dir / 'charts' / comp_name
+
+            if comp_name in existing and spec_dir:
+                # Real chart exists in the application repo — copy it in.
+                chart_src = Path(spec_dir) / 'charts' / comp_name
+                self._copy_chart(chart_src, chart_dst)
+                continue
+
+            # No hand-written chart — generate a documented stub.
+            tmpl_dir = chart_dst / 'templates'
+            tmpl_dir.mkdir(parents=True, exist_ok=True)
+
+            image = getattr(comp, 'image', '') or ''
+            self._write_yaml(chart_dst / 'Chart.yaml', {
+                'apiVersion': 'v2',
+                'name': comp_name,
+                'description': f'Custom component: {comp_name}',
+                'version': '0.1.0',
+                'type': 'application',
+            })
+
+            ports = getattr(comp, 'ports', []) or []
+            env = getattr(comp, 'env', {}) or {}
+            resources = getattr(comp, 'resources', {}) or {}
+            values_lines = [
+                '# Custom component stub — generated by quickpat compose',
+                f'# Image: {image}',
+                f'# Replicas: {getattr(comp, "replicas", 1)}',
+            ]
+            if ports:
+                values_lines.append('# Ports:')
+                for p in ports:
+                    values_lines.append(f'#   {p}')
+            if env:
+                values_lines.append('# Env:')
+                for k, v in env.items():
+                    values_lines.append(f'#   {k}: {v}')
+            if resources:
+                values_lines.append(f'# Resources: {resources}')
+            values_lines += ['', 'global:', '  pattern: ""']
+            (chart_dst / 'values.yaml').write_text('\n'.join(values_lines) + '\n')
+            (tmpl_dir / '.gitkeep').touch()
 
     # ── LICENSE ─────────────────────────────────────────────────────
 
@@ -1062,9 +1169,23 @@ podman run -it --rm --pull=newer \
     def _write_yaml(self, path, data, doc_start=False):
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, 'w') as f:
+            if self.config.get('generated_headers'):
+                f.write('# Generated by quickpat compose — do not edit\n')
             if doc_start:
                 f.write('---\n')
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+
+    def _copy_chart(self, src: Path, dst: Path):
+        """Copy a hand-written chart directory into the VP output.
+
+        Replaces any previous copy so re-runs stay in sync with the source.
+        The source is always the hand-written chart in the application repo;
+        the destination is charts/<name>/ inside the VP output directory.
+        """
+        import shutil
+        if dst.exists():
+            shutil.rmtree(dst)
+        shutil.copytree(src, dst)
 
 
 def build_report(analysis, config=None):
