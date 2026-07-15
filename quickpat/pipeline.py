@@ -19,6 +19,7 @@ from .profile import (
 )
 from .providers.base import Provider
 from .compose import load_application_spec, compile_spec, AppSpecError, ComposeError
+from .compose.qs_generator import QSGenerator
 from .spec import load_spec, build_from_spec, SpecError
 from .subchart import fetch_and_analyze_subcharts
 from .validator import validate_and_fix, validate, ValidationResult
@@ -348,6 +349,47 @@ def compose_from_spec(
         if not issue.fix_applied:
             result.warnings.append(f"[{issue.severity}] {issue.file}: {issue.message}")
 
+    result.files_created = _list_created_files(output_dir, config)
+    return result
+
+
+def compose_qs_from_spec(
+    spec_path: str,
+    output_dir: str = None,
+    pattern_name: str = None,
+) -> TransformResult:
+    """Compile an ApplicationSpec YAML into a self-contained QS Helm chart.
+
+    When output_dir is not specified, writes into qs-out/ inside the same
+    directory as spec_path (the application repo).
+    """
+    result = TransformResult(success=False)
+
+    try:
+        spec = load_application_spec(spec_path)
+    except AppSpecError as e:
+        result.warnings.append(str(e))
+        return result
+
+    spec_dir = str(Path(spec_path).resolve().parent)
+    if not output_dir:
+        output_dir = str(Path(spec_dir) / 'qs-out')
+    if pattern_name:
+        spec.name = pattern_name
+
+    try:
+        _, config = compile_spec(spec, output_dir, spec_dir=spec_dir)
+    except ComposeError as e:
+        result.warnings.append(str(e))
+        return result
+
+    result.pattern_dir = output_dir
+    result.config = config
+
+    gen = QSGenerator(spec, config, Path(output_dir))
+    gen.generate()
+
+    result.success = True
     result.files_created = _list_created_files(output_dir, config)
     return result
 

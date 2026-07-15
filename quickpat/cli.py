@@ -12,7 +12,7 @@ from .config import get as cfg
 from .generator import build_report
 from .providers import make_provider
 from .operators import OPERATORS
-from .pipeline import transform, transform_remote, skill_analyze, create_from_spec, compose_from_spec, TransformResult
+from .pipeline import transform, transform_remote, skill_analyze, create_from_spec, compose_from_spec, compose_qs_from_spec, TransformResult
 from .profile import load_profile
 from .readiness import check_readiness
 from .registry import (
@@ -115,8 +115,12 @@ def main():
     compose_p.add_argument('--output', '-o', help='Output directory')
     compose_p.add_argument('--name', help='Pattern name override')
     compose_p.add_argument(
+        '--format', choices=['vp', 'qs'], default='vp',
+        help='Output format: vp (Validated Pattern, default) or qs (Quickstart Helm chart)',
+    )
+    compose_p.add_argument(
         '--no-fix', action='store_true',
-        help='Skip auto-fix validation pass',
+        help='Skip auto-fix validation pass (VP only)',
     )
 
     # batch subcommand
@@ -390,31 +394,46 @@ def cmd_new(args):
 
 
 def cmd_compose(args):
-    """Compile an ApplicationSpec into a Validated Pattern."""
-    print("=== QuickPat Compose: ApplicationSpec -> Validated Pattern ===\n")
-
-    # When --output is omitted, compose writes into vp-out/ next to spec.yaml.
-    # Pass None so pipeline.compose_from_spec applies the default.
+    """Compile an ApplicationSpec into a VP or QS."""
+    fmt = getattr(args, 'format', 'vp')
     output_dir = args.output or None
 
-    if not output_dir:
-        resolved = str(Path(args.spec).resolve().parent / 'vp-out')
-        print(f"Output: {resolved} (application repo, default)\n")
-
-    result = compose_from_spec(
-        spec_path=args.spec,
-        output_dir=output_dir,
-        pattern_name=args.name,
-        auto_fix=not args.no_fix,
-    )
+    if fmt == 'qs':
+        print("=== QuickPat Compose: ApplicationSpec -> Quickstart Helm Chart ===\n")
+        if not output_dir:
+            resolved = str(Path(args.spec).resolve().parent / 'qs-out')
+            print(f"Output: {resolved} (application repo, default)\n")
+        result = compose_qs_from_spec(
+            spec_path=args.spec,
+            output_dir=output_dir,
+            pattern_name=args.name,
+        )
+    else:
+        print("=== QuickPat Compose: ApplicationSpec -> Validated Pattern ===\n")
+        if not output_dir:
+            resolved = str(Path(args.spec).resolve().parent / 'vp-out')
+            print(f"Output: {resolved} (application repo, default)\n")
+        result = compose_from_spec(
+            spec_path=args.spec,
+            output_dir=output_dir,
+            pattern_name=args.name,
+            auto_fix=not args.no_fix,
+        )
 
     if result.success:
-        _print_transform_result(result)
-        if result.config:
-            gn = result.config.get('cluster_group_name', 'prod')
-            blocks = result.config.get('_block_configs', {})
+        if fmt == 'qs':
+            out = result.pattern_dir
+            n = len(result.files_created) if result.files_created else '?'
+            print(f"QS chart generated: {out}/\nFiles: {n}")
+            blocks = result.config.get('_block_configs', {}) if result.config else {}
             if blocks:
                 print(f"\nBlocks compiled: {', '.join(blocks)}")
+        else:
+            _print_transform_result(result)
+            if result.config:
+                blocks = result.config.get('_block_configs', {})
+                if blocks:
+                    print(f"\nBlocks compiled: {', '.join(blocks)}")
     else:
         for w in result.warnings:
             print(f"Error: {w}", file=sys.stderr)
