@@ -121,15 +121,24 @@ blocks:
 
 The `{{ blocks.model-storage.output.connection_name }}` reference is a template variable — resolved at compile time from the `object-storage` block's declared outputs. The compiler validates that all references resolve.
 
-**object-storage** — deploys MinIO with an init container that downloads detector models from HuggingFace. Declares the Vault secrets that replace the upstream chart's hardcoded `THEACCESSKEY`/`THESECRETKEY`.
+**object-storage** — S3-compatible storage for model weights, datasets, or uploaded documents. The spec declares what the application needs (a named bucket); the deployment environment specifies which backend via platform overrides. Three providers are supported:
+
+| Provider | When to use | What gets generated |
+|---|---|---|
+| `minio` | Bare metal / on-premises | PVC + Deployment + Service + bucket-init container |
+| `odf` | Clusters with OpenShift Data Foundation | ObjectBucketClaim + setup Job |
+| `s3` | AWS, GCP, Azure (external bucket) | credentials Secret + data-connection only |
+
+The `data-connection` Secret is always generated — it is the stable interface that all consumers (KServe model serving, ingestion pipelines, LlamaStack) reference regardless of backend.
 
 ```yaml
   model-storage:
     type: object-storage
     config:
-      provider: minio
+      provider: minio   # minio | odf | s3 — can be overridden via platform values
+      bucket: huggingface
       storage: 50Gi
-      init_models:
+      init_models:      # minio only: download these models at startup
         - ibm-granite/granite-guardian-hap-125m
         - protectai/deberta-v3-base-prompt-injection-v2
     secrets:
@@ -140,6 +149,17 @@ The `{{ blocks.model-storage.output.connection_name }}` reference is a template 
         vault_path: lemonade-stand/minio
         key: AWS_SECRET_ACCESS_KEY
 ```
+
+To deploy on AWS with S3 instead of MinIO, set in `vp-out/overrides/values-AWS.yaml`:
+```yaml
+modelStorage:
+  provider: s3
+  endpoint: https://s3.amazonaws.com
+  region: us-east-1
+  bucket: my-lemonade-stand-bucket   # pre-create this in your AWS account
+```
+
+No spec change needed — the same spec produces a different backend on each platform.
 
 **guardrails-orchestrator** — creates the TrustyAI GuardrailsOrchestrator CR and its routing ConfigMap.
 
@@ -393,21 +413,55 @@ oc login <cluster>
 
 ---
 
+## CLI reference
+
+```bash
+quickpat compose spec.yaml                   # VP output → vp-out/ (default)
+quickpat compose spec.yaml --format qs       # QS Helm chart → qs-out/
+quickpat compose spec.yaml --output /path/to/out  # explicit output directory
+quickpat compose spec.yaml --no-fix          # skip auto-fix validation (VP only)
+quickpat compose spec.yaml --no-create-service-account  # skip RBAC for ODF setup Job
+```
+
+`--create-service-account` / `--no-create-service-account`: controls whether the
+compiler generates a ServiceAccount, Role, and RoleBinding for the ODF storage
+setup Job. Default: `true` (works out of the box). Pass `--no-create-service-account`
+in environments with strict RBAC policies — you must pre-create the SA manually
+(the Job template includes a comment showing the exact `oc create` commands).
+
+---
+
 ## Block reference
 
-| Block type | Operators installed | Local charts generated |
-|---|---|---|
-| `ai-platform-foundation` | openshift-ai, serverless, servicemesh | dsc (DataScienceCluster CR) |
-| `gpu-compute` | nvidia-gpu, nfd | nfd (NodeFeatureDiscovery CR), nvidia-config (ClusterPolicy) |
-| `model-serving` | — | None (served by upstream QS chart or local chart per instance) |
-| `object-storage` | — | None (served by upstream QS chart) |
-| `guardrails-orchestrator` | — | None (served by upstream QS chart) |
-| `vector-store` | — | None |
-| `data-pipeline` | openshift-pipelines | None |
-| `sso-auth` | — | None |
+| Block type | Operators installed | QS templates generated | VP local charts |
+|---|---|---|---|
+| `ai-platform-foundation` | openshift-ai, serverless, servicemesh | prereqs in NOTES.txt | dsc (DataScienceCluster CR) |
+| `gpu-compute` | nvidia-gpu, nfd | prereqs in NOTES.txt | nfd (NodeFeatureDiscovery CR), nvidia-config (ClusterPolicy) |
+| `model-serving` | — | ServingRuntime + InferenceService | None (upstream QS chart) |
+| `object-storage` | — | Provider-conditional (see below) | None (upstream QS chart) |
+| `guardrails-orchestrator` | — | GuardrailsOrchestrator CR + ConfigMap | None (upstream QS chart) |
+| `vector-store` | — | pgvector Deployment + Service + Secret | None |
+| `data-pipeline` | openshift-pipelines | Tekton Pipeline (partial) | None |
+| `sso-auth` | — | Keycloak CR + Realm + RBAC | None |
+
+### object-storage QS templates by provider
+
+| File | minio | odf | s3 |
+|---|---|---|---|
+| `pvc.yaml` | ✅ guarded | — | — |
+| `deployment.yaml` | ✅ MinIO + bucket-init container | — | — |
+| `service.yaml` | ✅ | — | — |
+| `obc.yaml` | — | ✅ ObjectBucketClaim | — |
+| `obc-setup.yaml` | — | ✅ Job + optional RBAC | — |
+| `credentials.yaml` | ✅ from `.Values.secrets.*` | — | ✅ from `.Values.secrets.*` |
+| `data-connection.yaml` | ✅ endpoint from service name | ✅ written by setup Job | ✅ endpoint from `.Values.<key>.endpoint` |
 
 ## What compose doesn't do yet
 
-- DSC component customization from `config.dsc` — the generated DSC uses the default from the operator registry. The `trustyai: Managed` config in the spec is noted but not yet applied to the chart template.
-- Per-instance local chart generation for `model-serving` — when the upstream QS chart doesn't exist or you want decomposed ArgoCD apps, this is the Phase 2 path.
-- ExternalSecret template generation inside `charts/lemonade-stand-secrets/` — the chart directory structure is created but the ESO templates are a work in progress.
+- Data pipeline QS templates — `ingest/` directory is created but Tekton Pipeline
+  templates are minimal. The `configure-pipeline` initial bucket setup (for RAG)
+  is now handled by the bucket-init container in the MinIO Deployment.
+- Per-instance local chart generation for `model-serving` in VP output — when
+  you want decomposed ArgoCD apps instead of the upstream chart, this is Phase 2.
+- External Helm chart dependencies in QS output — the compiler always generates
+  inline templates rather than pulling from `ai-architecture-charts`.
