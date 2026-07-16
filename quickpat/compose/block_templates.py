@@ -61,7 +61,9 @@ def _vllm_serving_runtime(block_name: str, config: dict) -> str:
     key = _camel(block_name)
     vllm_args = config.get('vllm_args', {})
     extra_args = ''.join(
-        f'\n        - --{k.replace("_", "-")}={v}'
+        # Boolean flags (empty string value) render as bare flags: --enable-auto-tool-choice
+        # Value flags render as: --max-model-len=4096
+        f'\n        - --{k.replace("_", "-")}' if v == '' else f'\n        - --{k.replace("_", "-")}={v}'
         for k, v in vllm_args.items()
     )
     return f"""\
