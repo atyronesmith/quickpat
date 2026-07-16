@@ -94,7 +94,10 @@ class QSGenerator:
             if btype == 'model-serving':
                 templates = model_serving_templates(block_name, cfg)
             elif btype == 'object-storage':
-                templates = object_storage_templates(block_name, cfg)
+                templates = object_storage_templates(
+                    block_name, cfg,
+                    create_service_account=self.config.get('create_service_account', True),
+                )
             elif btype == 'guardrails-orchestrator':
                 templates = guardrails_orchestrator_templates(block_name, cfg)
             elif btype == 'vector-store':
@@ -212,25 +215,40 @@ stringData:
         return decls
 
     def _collect_secret_keys(self, decls: list[dict]) -> list[str]:
-        """Derive values.yaml secret key names from declarations."""
+        """Derive values.yaml secrets section keys from spec declarations.
+
+        Key naming: secrets.<blockKey>AccessKey / secrets.<blockKey>SecretKey
+        for object-storage blocks that use minio or s3. odf blocks skip secrets
+        entirely (OBC controller handles credentials). Block-level secret
+        declarations (e.g. vLLM API key) use camelCase of block+key name.
+        """
         keys = []
-        # vLLM API key
         for block_name, block in self.spec.blocks.items():
+            bkey = _camel(block_name)
+            if block.block_type == 'object-storage':
+                provider = (block.config or {}).get('provider', 'minio')
+                if provider in ('minio', 's3'):
+                    keys += [f'{bkey}AccessKey', f'{bkey}SecretKey']
+                # odf: no credentials in values — OBC controller provides them
+                continue
             for sec_name, sec_decl in block.secrets.items():
-                key = sec_decl.key or sec_name
-                camel_key = _camel(f'{block_name}-{key}'.replace('/', '-'))
-                keys.append(camel_key)
-        # MinIO creds (object-storage blocks)
-        for block_name, block in self.spec.blocks.items():
-            if block.block_type == 'object-storage' and not block.secrets:
-                keys += ['minioAccessKey', 'minioSecretKey']
-                break
+                raw_key = sec_decl.key or sec_name
+                keys.append(_camel(f'{block_name}-{raw_key}'.replace('/', '-')))
         return keys
+
+    def _collect_storage_providers(self) -> dict[str, str]:
+        """Return {block_name: provider} for all object-storage blocks."""
+        return {
+            name: (block.config or {}).get('provider', 'minio')
+            for name, block in self.spec.blocks.items()
+            if block.block_type == 'object-storage'
+        }
 
     # ── Create-secrets script ─────────────────────────────────────────────────
 
     def _write_create_secrets_sh(self, secret_decls: list[dict]):
-        content = build_create_secrets_sh(self.spec.name, secret_decls)
+        providers = self._collect_storage_providers()
+        content = build_create_secrets_sh(self.spec.name, secret_decls, providers)
         path = self.scripts_dir / 'create-secrets.sh'
         path.write_text(content)
         path.chmod(0o755)

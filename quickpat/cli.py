@@ -122,6 +122,16 @@ def main():
         '--no-fix', action='store_true',
         help='Skip auto-fix validation pass (VP only)',
     )
+    compose_p.add_argument(
+        '--create-service-account', action=argparse.BooleanOptionalAction, default=True,
+        dest='create_service_account',
+        help=(
+            'Generate ServiceAccount + Role + RoleBinding for the ODF '
+            'data-connection setup Job (default: true). Pass '
+            '--no-create-service-account in environments with strict RBAC '
+            'policies — you must pre-create the SA yourself.'
+        ),
+    )
 
     # batch subcommand
     batch_p = subparsers.add_parser(
@@ -407,6 +417,7 @@ def cmd_compose(args):
             spec_path=args.spec,
             output_dir=output_dir,
             pattern_name=args.name,
+            create_service_account=args.create_service_account,
         )
     else:
         print("=== QuickPat Compose: ApplicationSpec -> Validated Pattern ===\n")
@@ -418,6 +429,7 @@ def cmd_compose(args):
             output_dir=output_dir,
             pattern_name=args.name,
             auto_fix=not args.no_fix,
+            create_service_account=args.create_service_account,
         )
 
     if result.success:

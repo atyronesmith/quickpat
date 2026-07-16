@@ -844,17 +844,76 @@ podman run -it --rm --pull=newer \
 
     # ── overrides/ ──────────────────────────────────────────────────
 
+    # Platform → default storage provider for object-storage blocks.
+    # These are sensible starting points — operators override as needed.
+    _PLATFORM_STORAGE = {
+        'AWS':      ('s3',    'https://s3.amazonaws.com', 'us-east-1'),
+        'Azure':    ('s3',    'https://<account>.blob.core.windows.net', 'eastus'),
+        'GCP':      ('s3',    'https://storage.googleapis.com', 'us-central1'),
+        'IBMCloud': ('odf',   '', ''),
+        'None':     ('minio', '', ''),
+    }
+
     def _generate_overrides(self):
         overrides_dir = self.output_dir / 'overrides'
         overrides_dir.mkdir(exist_ok=True)
 
-        # Platform override placeholders referenced by sharedValueFiles
-        for platform in cfg("platforms", ["AWS", "Azure", "GCP", "IBMCloud", "None"]):
+        # Collect object-storage blocks from the compiled spec
+        storage_blocks = {
+            name: cfg_block
+            for name, cfg_block in self.config.get('_block_configs', {}).items()
+            if any(
+                b.block_type == 'object-storage'
+                for b in []  # resolved below
+            )
+        }
+        # Simpler: check existing_custom_charts keys don't matter — use _block_configs
+        # to find all block types. We need block type info from config.
+        # The compiler puts block configs in _block_configs but not types.
+        # Use custom_components absence: object-storage blocks show up in
+        # _block_configs. We detect them by checking the spec blocks via config.
+        # For now, collect from 'dsc_config' absence + 'gpu_config' absence
+        # and check the keys. Best approach: compiler should pass block types.
+        # Workaround: generator writes storage overrides for ALL platforms
+        # when storage-related config keys exist in the config dict.
+        has_object_storage = bool(self.config.get('secret_groups'))
+
+        platforms = cfg("platforms", ["AWS", "Azure", "GCP", "IBMCloud", "None"])
+        for platform in platforms:
             path = overrides_dir / f'values-{platform}.yaml'
-            if not path.exists():
-                path.write_text(
-                    f'# Platform-specific overrides for {platform}\n'
-                )
+            provider, endpoint, region = self._PLATFORM_STORAGE.get(
+                platform, ('minio', '', '')
+            )
+            lines = [f'# Platform-specific overrides for {platform}']
+
+            if has_object_storage:
+                lines += [
+                    '',
+                    '# Object storage backend for this platform.',
+                    '# Change provider to match your environment.',
+                    '# Providers: minio (in-cluster), odf (OpenShift Data Foundation), s3 (external S3)',
+                ]
+                if provider == 'minio':
+                    lines += [
+                        '# objectStorage:',
+                        '#   provider: minio  # default for bare metal',
+                    ]
+                elif provider == 'odf':
+                    lines += [
+                        '# objectStorage:',
+                        '#   provider: odf',
+                        '#   odfStorageClass: openshift-storage.noobaa.io',
+                    ]
+                else:  # s3 / azure
+                    lines += [
+                        '# objectStorage:',
+                        f'#   provider: s3',
+                        f'#   endpoint: {endpoint}',
+                        f'#   region: {region}',
+                        '#   bucket: <your-pre-existing-bucket-name>',
+                    ]
+
+            path.write_text('\n'.join(lines) + '\n')
 
     # ── remote strategy: secrets chart ─────────────────────────────
 

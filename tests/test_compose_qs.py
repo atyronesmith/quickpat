@@ -242,7 +242,8 @@ custom: {}
     def test_credentials_uses_secret_values(self, tmp_path):
         out = _qs(tmp_path, self.SPEC)
         creds = (out / 'chart' / 'templates' / 'store' / 'credentials.yaml').read_text()
-        assert '.Values.secrets.minioAccessKey' in creds
+        # Key name is now <camelBlockName>AccessKey, not generic minioAccessKey
+        assert '.Values.secrets.storeAccessKey' in creds
 
 
 # ── Default output → qs-out ───────────────────────────────────────────────────
@@ -310,3 +311,176 @@ class TestLemonadeStandQS:
         # Real templates from the repo — not stubs
         assert (out / 'chart' / 'templates' / 'lemonade-stand-app' / 'deployment.yaml').exists()
         assert not (out / 'chart' / 'templates' / 'lemonade-stand-app' / '.gitkeep').exists()
+
+
+# ── Provider-conditional object storage ──────────────────────────────────────
+
+
+class TestObjectStorageProviders:
+    """object_storage_templates() generates provider-conditional Helm templates."""
+
+    def _spec(self, provider: str, block_name: str = 'store') -> str:
+        return f"""\
+apiVersion: supplychain/v1alpha1
+kind: ApplicationSpec
+metadata:
+  name: provider-test
+  tier: sandbox
+  upstream:
+    repo: https://github.com/example/qs.git
+blocks:
+  platform:
+    type: ai-platform-foundation
+  {block_name}:
+    type: object-storage
+    config:
+      provider: {provider}
+      bucket: testbucket
+      storage: 5Gi
+wiring: []
+custom: {{}}
+"""
+
+    # ── minio ─────────────────────────────────────────────────────────────────
+
+    def test_minio_generates_pvc(self, tmp_path):
+        out = _qs(tmp_path, self._spec('minio'))
+        pvc = (out / 'chart' / 'templates' / 'store' / 'pvc.yaml').read_text()
+        assert 'PersistentVolumeClaim' in pvc
+        assert 'eq .Values.store.provider "minio"' in pvc
+
+    def test_minio_generates_deployment(self, tmp_path):
+        out = _qs(tmp_path, self._spec('minio'))
+        dep = (out / 'chart' / 'templates' / 'store' / 'deployment.yaml').read_text()
+        assert 'kind: Deployment' in dep
+        assert 'eq .Values.store.provider "minio"' in dep
+
+    def test_minio_deployment_has_bucket_init_container(self, tmp_path):
+        out = _qs(tmp_path, self._spec('minio'))
+        dep = (out / 'chart' / 'templates' / 'store' / 'deployment.yaml').read_text()
+        assert 'bucket-init' in dep
+        assert 'mc mb' in dep
+
+    def test_minio_generates_service(self, tmp_path):
+        out = _qs(tmp_path, self._spec('minio'))
+        assert (out / 'chart' / 'templates' / 'store' / 'service.yaml').exists()
+
+    def test_minio_no_obc(self, tmp_path):
+        out = _qs(tmp_path, self._spec('minio'))
+        obc = (out / 'chart' / 'templates' / 'store' / 'obc.yaml').read_text()
+        assert 'ObjectBucketClaim' not in obc or 'eq .Values.store.provider "odf"' in obc
+
+    def test_minio_data_connection_uses_service_endpoint(self, tmp_path):
+        out = _qs(tmp_path, self._spec('minio'))
+        dc = (out / 'chart' / 'templates' / 'store' / 'data-connection.yaml').read_text()
+        assert 'store:9000' in dc
+
+    def test_minio_values_yaml_has_provider(self, tmp_path):
+        out = _qs(tmp_path, self._spec('minio'))
+        values = (out / 'chart' / 'values.yaml').read_text()
+        assert 'provider: minio' in values
+
+    # ── odf ──────────────────────────────────────────────────────────────────
+
+    def test_odf_generates_obc(self, tmp_path):
+        out = _qs(tmp_path, self._spec('odf'))
+        obc = (out / 'chart' / 'templates' / 'store' / 'obc.yaml').read_text()
+        assert 'ObjectBucketClaim' in obc
+        assert 'eq .Values.store.provider "odf"' in obc
+
+    def test_odf_generates_setup_job(self, tmp_path):
+        out = _qs(tmp_path, self._spec('odf'))
+        setup = (out / 'chart' / 'templates' / 'store' / 'obc-setup.yaml').read_text()
+        assert 'kind: Job' in setup
+        assert 'helm.sh/hook' in setup
+
+    def test_odf_setup_job_creates_data_connection(self, tmp_path):
+        out = _qs(tmp_path, self._spec('odf'))
+        setup = (out / 'chart' / 'templates' / 'store' / 'obc-setup.yaml').read_text()
+        assert 'store-data-connection' in setup
+
+    def test_odf_creates_rbac_by_default(self, tmp_path):
+        out = _qs(tmp_path, self._spec('odf'))
+        setup = (out / 'chart' / 'templates' / 'store' / 'obc-setup.yaml').read_text()
+        assert 'kind: ServiceAccount' in setup
+        assert 'kind: Role' in setup
+        assert 'kind: RoleBinding' in setup
+
+    def test_odf_no_rbac_when_flag_false(self, tmp_path):
+        spec_file = tmp_path / 'spec.yaml'
+        spec_file.write_text(self._spec('odf'))
+        from quickpat.pipeline import compose_qs_from_spec
+        result = compose_qs_from_spec(
+            str(spec_file),
+            output_dir=str(tmp_path / 'qs'),
+            create_service_account=False,
+        )
+        assert result.success
+        setup = (tmp_path / 'qs' / 'chart' / 'templates' / 'store' / 'obc-setup.yaml').read_text()
+        assert 'kind: ServiceAccount' not in setup
+        assert 'kind: Role' not in setup
+        # Comment explaining manual creation should be present
+        assert 'oc create sa' in setup
+
+    def test_odf_pvc_guarded_out(self, tmp_path):
+        out = _qs(tmp_path, self._spec('odf'))
+        pvc = (out / 'chart' / 'templates' / 'store' / 'pvc.yaml').read_text()
+        # PVC only renders for minio — should be empty or guarded out for odf
+        assert 'eq .Values.store.provider "minio"' in pvc
+
+    # ── s3 ───────────────────────────────────────────────────────────────────
+
+    def test_s3_no_pvc(self, tmp_path):
+        out = _qs(tmp_path, self._spec('s3'))
+        pvc = (out / 'chart' / 'templates' / 'store' / 'pvc.yaml').read_text()
+        assert 'eq .Values.store.provider "minio"' in pvc  # guarded to minio only
+
+    def test_s3_no_deployment(self, tmp_path):
+        out = _qs(tmp_path, self._spec('s3'))
+        dep = (out / 'chart' / 'templates' / 'store' / 'deployment.yaml').read_text()
+        assert 'eq .Values.store.provider "minio"' in dep  # no MinIO for s3
+
+    def test_s3_data_connection_uses_endpoint_value(self, tmp_path):
+        out = _qs(tmp_path, self._spec('s3'))
+        dc = (out / 'chart' / 'templates' / 'store' / 'data-connection.yaml').read_text()
+        assert '.Values.store.endpoint' in dc
+
+    def test_s3_values_yaml_has_endpoint_field(self, tmp_path):
+        out = _qs(tmp_path, self._spec('s3'))
+        values = (out / 'chart' / 'values.yaml').read_text()
+        assert 'endpoint:' in values
+        assert 'region:' in values
+
+    # ── Interface contract ────────────────────────────────────────────────────
+
+    def test_data_connection_always_present_minio(self, tmp_path):
+        out = _qs(tmp_path, self._spec('minio'))
+        assert (out / 'chart' / 'templates' / 'store' / 'data-connection.yaml').exists()
+
+    def test_data_connection_always_present_odf(self, tmp_path):
+        out = _qs(tmp_path, self._spec('odf'))
+        assert (out / 'chart' / 'templates' / 'store' / 'data-connection.yaml').exists()
+
+    def test_data_connection_always_present_s3(self, tmp_path):
+        out = _qs(tmp_path, self._spec('s3'))
+        assert (out / 'chart' / 'templates' / 'store' / 'data-connection.yaml').exists()
+
+    # ── create-secrets.sh ─────────────────────────────────────────────────────
+
+    def test_minio_script_auto_generates_creds(self, tmp_path):
+        out = _qs(tmp_path, self._spec('minio'))
+        sh = (out / 'scripts' / 'create-secrets.sh').read_text()
+        assert 'openssl rand' in sh
+        assert 'store-credentials' in sh
+
+    def test_s3_script_prompts_for_creds(self, tmp_path):
+        out = _qs(tmp_path, self._spec('s3'))
+        sh = (out / 'scripts' / 'create-secrets.sh').read_text()
+        assert 'read -rsp' in sh
+
+    def test_odf_script_skips_credentials(self, tmp_path):
+        out = _qs(tmp_path, self._spec('odf'))
+        sh = (out / 'scripts' / 'create-secrets.sh').read_text()
+        assert 'ODF' in sh or 'odf' in sh.lower()
+        # ODF should NOT generate credential creation commands
+        assert 'store-credentials' not in sh

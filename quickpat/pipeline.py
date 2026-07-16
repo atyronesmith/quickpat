@@ -302,6 +302,7 @@ def compose_from_spec(
     pattern_name: str = None,
     auto_fix: bool = True,
     max_fix_iterations: int = 3,
+    create_service_account: bool = True,
 ) -> TransformResult:
     """Compile an ApplicationSpec YAML into a Validated Pattern directory.
 
@@ -324,7 +325,10 @@ def compose_from_spec(
         spec.name = pattern_name
 
     try:
-        analysis, config = compile_spec(spec, output_dir, spec_dir=spec_dir)
+        analysis, config = compile_spec(
+            spec, output_dir, spec_dir=spec_dir,
+            create_service_account=create_service_account,
+        )
     except ComposeError as e:
         result.warnings.append(str(e))
         return result
@@ -357,6 +361,7 @@ def compose_qs_from_spec(
     spec_path: str,
     output_dir: str = None,
     pattern_name: str = None,
+    create_service_account: bool = True,
 ) -> TransformResult:
     """Compile an ApplicationSpec YAML into a self-contained QS Helm chart.
 
@@ -378,7 +383,10 @@ def compose_qs_from_spec(
         spec.name = pattern_name
 
     try:
-        _, config = compile_spec(spec, output_dir, spec_dir=spec_dir)
+        _, config = compile_spec(
+            spec, output_dir, spec_dir=spec_dir,
+            create_service_account=create_service_account,
+        )
     except ComposeError as e:
         result.warnings.append(str(e))
         return result
