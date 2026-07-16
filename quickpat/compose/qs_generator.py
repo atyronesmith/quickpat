@@ -18,6 +18,7 @@ from .block_templates import (
     gpu_compute_prereqs,
     model_serving_templates,
     object_storage_templates,
+    data_pipeline_templates,
     guardrails_orchestrator_templates,
     build_values,
     build_notes,
@@ -103,12 +104,33 @@ class QSGenerator:
             elif btype == 'vector-store':
                 templates = self._vector_store_templates(block_name, cfg)
             elif btype == 'data-pipeline':
-                templates = {}  # TODO: data pipeline QS templates
+                templates = data_pipeline_templates(
+                    block_name, cfg,
+                    resolved_inputs=self._resolve_inputs(block),
+                )
             else:
                 templates = {}
 
             for filename, content in templates.items():
                 (block_dir / filename).write_text(content)
+
+    def _resolve_inputs(self, block) -> dict:
+        """Resolve a block's inputs: dict to concrete block configs.
+
+        Returns {role: {'block_name': str, 'block_type': str, 'config': dict}}
+        for each declared input reference. Silently skips references that don't
+        match a known block name.
+        """
+        resolved = {}
+        for role, ref_name in (block.inputs or {}).items():
+            ref_block = self.spec.blocks.get(ref_name)
+            if ref_block:
+                resolved[role] = {
+                    'block_name': ref_name,
+                    'block_type': ref_block.block_type,
+                    'config': ref_block.config or {},
+                }
+        return resolved
 
     def _vector_store_templates(self, block_name: str, config: dict) -> dict[str, str]:
         key = _camel(block_name)

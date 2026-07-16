@@ -31,6 +31,7 @@ class BlockInstance:
     profile: str = ''
     config: dict = field(default_factory=dict)
     secrets: dict = field(default_factory=dict)  # name → SecretDecl
+    inputs: dict = field(default_factory=dict)   # role → block_name (e.g. vector_store: "db")
 
 
 @dataclass
@@ -139,12 +140,17 @@ def _parse_blocks(raw: dict) -> dict:
                 generate=bool(sec_raw.get('generate', False)),
             )
 
+        inputs = block_raw.get('inputs', {}) or {}
+        if not isinstance(inputs, dict):
+            raise AppSpecError(f"blocks.{block_name}.inputs must be a mapping")
+
         blocks[block_name] = BlockInstance(
             name=block_name,
             block_type=block_raw['type'],
             profile=block_raw.get('profile', ''),
             config=block_raw.get('config', {}),
             secrets=secrets,
+            inputs=inputs,
         )
 
     return blocks

@@ -484,3 +484,175 @@ custom: {{}}
         assert 'ODF' in sh or 'odf' in sh.lower()
         # ODF should NOT generate credential creation commands
         assert 'store-credentials' not in sh
+
+
+# ── Data pipeline block ───────────────────────────────────────────────────────
+
+
+class TestDataPipelineBlock:
+    """data_pipeline_templates() generates Tekton Pipeline + Task + RBAC."""
+
+    SPEC = """\
+apiVersion: supplychain/v1alpha1
+kind: ApplicationSpec
+metadata:
+  name: dp-test
+  tier: sandbox
+  upstream:
+    repo: https://github.com/example/qs.git
+blocks:
+  platform:
+    type: ai-platform-foundation
+    config:
+      dsc:
+        datasciencepipelines: Managed
+  db:
+    type: vector-store
+    config:
+      database: testdb
+      port: 5432
+  store:
+    type: object-storage
+    config:
+      provider: minio
+      bucket: testbucket
+  ingest:
+    type: data-pipeline
+    config:
+      sources:
+        - name: docs
+          type: s3
+          config:
+            bucket: testbucket
+      schedule: manual
+      chunk_size: 256
+    inputs:
+      vector_store: db
+      object_storage: store
+wiring: []
+custom: {}
+"""
+
+    SCHEDULED_SPEC = """\
+apiVersion: supplychain/v1alpha1
+kind: ApplicationSpec
+metadata:
+  name: dp-scheduled
+  tier: sandbox
+  upstream:
+    repo: https://github.com/example/qs.git
+blocks:
+  platform:
+    type: ai-platform-foundation
+  db:
+    type: vector-store
+    config:
+      database: embeddings
+      port: 5432
+  store:
+    type: object-storage
+    config:
+      provider: minio
+      bucket: docs
+  ingest:
+    type: data-pipeline
+    config:
+      sources:
+        - name: wiki
+          type: s3
+      schedule: daily
+      chunk_size: 512
+    inputs:
+      vector_store: db
+      object_storage: store
+wiring: []
+custom: {}
+"""
+
+    def test_pipeline_yaml_generated(self, tmp_path):
+        out = _qs(tmp_path, self.SPEC)
+        assert (out / 'chart' / 'templates' / 'ingest' / 'pipeline.yaml').exists()
+
+    def test_ingest_task_generated(self, tmp_path):
+        out = _qs(tmp_path, self.SPEC)
+        assert (out / 'chart' / 'templates' / 'ingest' / 'ingest-task.yaml').exists()
+
+    def test_pipeline_run_template_generated(self, tmp_path):
+        out = _qs(tmp_path, self.SPEC)
+        assert (out / 'chart' / 'templates' / 'ingest' / 'pipeline-run.yaml').exists()
+
+    def test_rbac_generated(self, tmp_path):
+        out = _qs(tmp_path, self.SPEC)
+        rbac = (out / 'chart' / 'templates' / 'ingest' / 'rbac.yaml').read_text()
+        assert 'kind: ServiceAccount' in rbac
+        assert 'kind: Role' in rbac
+        assert 'kind: RoleBinding' in rbac
+
+    def test_pipeline_has_vector_store_param(self, tmp_path):
+        out = _qs(tmp_path, self.SPEC)
+        pl = (out / 'chart' / 'templates' / 'ingest' / 'pipeline.yaml').read_text()
+        assert 'vector-store-endpoint' in pl
+        assert 'vector-store-db' in pl
+
+    def test_pipeline_has_object_storage_param(self, tmp_path):
+        out = _qs(tmp_path, self.SPEC)
+        pl = (out / 'chart' / 'templates' / 'ingest' / 'pipeline.yaml').read_text()
+        assert 'object-storage-endpoint' in pl
+        assert 'object-storage-bucket' in pl
+
+    def test_input_resolution_vector_store(self, tmp_path):
+        out = _qs(tmp_path, self.SPEC)
+        pl = (out / 'chart' / 'templates' / 'ingest' / 'pipeline.yaml').read_text()
+        # 'db' vector-store block: port 5432, database testdb
+        assert 'db:5432' in pl
+        assert 'testdb' in pl
+
+    def test_input_resolution_object_storage(self, tmp_path):
+        out = _qs(tmp_path, self.SPEC)
+        pl = (out / 'chart' / 'templates' / 'ingest' / 'pipeline.yaml').read_text()
+        # 'store' object-storage block: minio at store:9000, bucket testbucket
+        assert 'store:9000' in pl
+        assert 'testbucket' in pl
+
+    def test_task_references_vector_store_secret(self, tmp_path):
+        out = _qs(tmp_path, self.SPEC)
+        task = (out / 'chart' / 'templates' / 'ingest' / 'ingest-task.yaml').read_text()
+        assert 'db-secret' in task
+
+    def test_task_references_object_storage_credentials(self, tmp_path):
+        out = _qs(tmp_path, self.SPEC)
+        task = (out / 'chart' / 'templates' / 'ingest' / 'ingest-task.yaml').read_text()
+        assert 'store-credentials' in task
+
+    def test_task_uses_helm_image_value(self, tmp_path):
+        out = _qs(tmp_path, self.SPEC)
+        task = (out / 'chart' / 'templates' / 'ingest' / 'ingest-task.yaml').read_text()
+        assert '{{ .Values.ingest.image }}' in task
+
+    def test_manual_schedule_no_cronjob(self, tmp_path):
+        out = _qs(tmp_path, self.SPEC)
+        trigger = (out / 'chart' / 'templates' / 'ingest' / 'trigger.yaml').read_text()
+        # Guarded by {{- if ne .Values.ingest.schedule "manual" }}
+        assert 'ne .Values.ingest.schedule "manual"' in trigger
+
+    def test_scheduled_pipeline_has_cronjob(self, tmp_path):
+        out = _qs(tmp_path, self.SCHEDULED_SPEC)
+        trigger = (out / 'chart' / 'templates' / 'ingest' / 'trigger.yaml').read_text()
+        assert 'kind: CronJob' in trigger
+
+    def test_values_yaml_has_pipeline_section(self, tmp_path):
+        out = _qs(tmp_path, self.SPEC)
+        values = (out / 'chart' / 'values.yaml').read_text()
+        assert 'ingest:' in values
+        assert 'ingestion-pipeline' in values
+        assert 'schedule:' in values
+
+    def test_inputs_parsed_from_spec(self, tmp_path):
+        """Verify parser correctly captures inputs: block references."""
+        spec_file = tmp_path / 'spec.yaml'
+        spec_file.write_text(self.SPEC)
+        from quickpat.compose.parser import load_application_spec
+        spec = load_application_spec(str(spec_file))
+        ingest = spec.blocks['ingest']
+        assert ingest.inputs.get('vector_store') == 'db'
+        assert ingest.inputs.get('object_storage') == 'store'
