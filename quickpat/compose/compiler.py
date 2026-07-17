@@ -144,6 +144,12 @@ def compile_spec(
         'generated_headers': True,
         # Whether to generate SA + Role + RoleBinding for ODF setup Job
         'create_service_account': create_service_account,
+        # Device modes declared in spec (e.g. [cpu, gpu]) — drives device overrides
+        'devices': list(spec.devices),
+        # Upstream application-specific value overrides → overrides/<name>.yaml
+        'upstream_extra_values': dict(spec.upstream.extra_values),
+        # ignoreDifferences for the upstream ArgoCD app entry
+        'upstream_ignore_differences': list(spec.upstream.ignore_differences),
         # Raw block configs for future use
         '_block_configs': {
             name: block.config

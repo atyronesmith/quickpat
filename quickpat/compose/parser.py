@@ -15,6 +15,8 @@ class UpstreamRef:
     repo: str
     path: str = 'chart'
     branch: str = 'main'
+    extra_values: dict = field(default_factory=dict)      # upstream.extraValues → overrides/<name>.yaml
+    ignore_differences: list = field(default_factory=list) # upstream.ignoreDifferences → ArgoCD app
 
 
 @dataclass
@@ -62,6 +64,7 @@ class ApplicationSpec:
     blocks: dict   # name → BlockInstance (ordered)
     custom: dict   # name → CustomComponent
     wiring: list   # list of WiringEntry
+    devices: list = field(default_factory=list)  # [cpu, gpu, hpu] — deployment device modes
 
 
 VALID_TIERS = {'sandbox', 'tested', 'maintained'}
@@ -100,7 +103,13 @@ def load_application_spec(path: str) -> ApplicationSpec:
         repo=upstream_raw.get('repo', ''),
         path=upstream_raw.get('path', 'chart'),
         branch=upstream_raw.get('branch', 'main'),
+        extra_values=upstream_raw.get('extraValues', {}) or {},
+        ignore_differences=upstream_raw.get('ignoreDifferences', []) or [],
     )
+
+    devices = meta.get('devices', []) or []
+    if not isinstance(devices, list):
+        raise AppSpecError("metadata.devices must be a list (e.g. [cpu, gpu])")
 
     blocks = _parse_blocks(raw.get('blocks', {}))
     custom = _parse_custom(raw.get('custom', {}))
@@ -114,6 +123,7 @@ def load_application_spec(path: str) -> ApplicationSpec:
         blocks=blocks,
         custom=custom,
         wiring=wiring,
+        devices=devices,
     )
 
 

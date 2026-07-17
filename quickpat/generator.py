@@ -90,14 +90,24 @@ class PatternGenerator:
 
     # ── values-{clusterGroupName}.yaml ────────────────────────────────
 
+    def _build_shared_value_files(self) -> list:
+        files = ['/overrides/values-{{ $.Values.global.clusterPlatform }}.yaml']
+        if self.config.get('devices'):
+            files.append('/overrides/values-{{ $.Values.global.device }}.yaml')
+        return files
+
     def _generate_values_hub(self):
         operators = self.config.get('operators', [])
         app_namespace = self.config.get('app_namespace', self.analysis.name)
         app_name = self.config.get('app_name', self.analysis.name)
         use_vault = self.config.get('use_vault', False)
 
-        namespaces = self._build_namespaces(operators, app_namespace, use_vault)
-        subscriptions = self._build_subscriptions(operators)
+        # Filter GPU-specific operators out of main values when device overrides are active
+        device_ops = self._device_operators()
+        base_operators = [op for op in operators if op not in device_ops]
+
+        namespaces = self._build_namespaces(base_operators, app_namespace, use_vault)
+        subscriptions = self._build_subscriptions(base_operators)
         applications = self._build_applications(
             app_name, app_namespace, use_vault
         )
@@ -105,9 +115,7 @@ class PatternGenerator:
         group_name = self.config.get('cluster_group_name', 'prod')
         cg = {
             'name': group_name,
-            'sharedValueFiles': [
-                '/overrides/values-{{ $.Values.global.clusterPlatform }}.yaml',
-            ],
+            'sharedValueFiles': self._build_shared_value_files(),
             'namespaces': namespaces,
             'subscriptions': subscriptions,
             'applications': applications,
@@ -130,6 +138,16 @@ class PatternGenerator:
         app_name = self.config.get('app_name', self.analysis.name)
         app_ns = ns_overrides.get(ci.name, self.config.get('app_namespace', self.analysis.name))
         return [(app_name, app_ns, ci)]
+
+    # Operators that belong in the device override (values-gpu.yaml) rather
+    # than values-prod.yaml when the spec declares multiple devices.
+    _GPU_DEVICE_OPERATORS = {'nvidia-gpu', 'nfd'}
+
+    def _device_operators(self) -> set:
+        """Return operator keys that should move to device overrides."""
+        if self.config.get('devices'):
+            return self._GPU_DEVICE_OPERATORS & set(self.config.get('operators', []))
+        return set()
 
     def _build_namespaces(self, operators, app_namespace, use_vault):
         namespaces = {}
@@ -231,8 +249,12 @@ class PatternGenerator:
             }
 
         # Infrastructure config charts (operator CRs)
+        # Skip device-specific operators — they appear in values-gpu.yaml etc.
         operators = self.config.get('operators', [])
+        device_ops = self._device_operators()
         for op_key in operators:
+            if op_key in device_ops:
+                continue
             if op_key in INFRA_CHARTS:
                 ic = INFRA_CHARTS[op_key]
                 chart_name = ic['chart_name']
@@ -267,12 +289,24 @@ class PatternGenerator:
                     'path': chart_path,
                     'chartVersion': self.config.get('chart_branch', 'main'),
                 }
+                # extra_value_files from old config path (backward compat)
                 extra_files = self.config.get('extra_value_files')
                 if extra_files:
                     app_entry['extraValueFiles'] = extra_files
+                # upstream.extraValues → generate overrides/<name>.yaml + reference it
+                if self.config.get('upstream_extra_values'):
+                    override_path = f'/overrides/{name}.yaml'
+                    app_entry.setdefault('extraValueFiles', [])
+                    if override_path not in app_entry['extraValueFiles']:
+                        app_entry['extraValueFiles'].append(override_path)
+                # ignoreDifferences from old config path (backward compat)
                 ignore_diffs = self.config.get('ignore_differences')
                 if ignore_diffs:
                     app_entry['ignoreDifferences'] = ignore_diffs
+                # upstream.ignoreDifferences from spec
+                upstream_ignores = self.config.get('upstream_ignore_differences', [])
+                if upstream_ignores:
+                    app_entry['ignoreDifferences'] = upstream_ignores
                 applications[name] = app_entry
             else:
                 repo_url = ci.repo_url or self.config.get('chart_repo_url', '')
@@ -914,6 +948,68 @@ podman run -it --rm --pull=newer \
                     ]
 
             path.write_text('\n'.join(lines) + '\n')
+
+        # ── Device override files ────────────────────────────────────────────
+        # When the spec declares devices: [cpu, gpu], generate per-device overrides.
+        # GPU operators (NFD + NVIDIA) live here rather than in values-prod.yaml.
+        devices = self.config.get('devices', [])
+        group_name = self.config.get('cluster_group_name', 'prod')
+        operators = self.config.get('operators', [])
+        device_ops = self._device_operators()
+
+        if 'gpu' in devices and device_ops:
+            gpu_lines = ['# GPU device overrides — applied when global.device=gpu']
+            gpu_ns, gpu_subs, gpu_apps = {}, {}, {}
+            for op_key in operators:
+                if op_key not in device_ops:
+                    continue
+                op = OPERATORS[op_key]
+                ns = op['namespace']
+                if ns != 'openshift-operators':
+                    ns_cfg = op.get('namespace_config')
+                    gpu_ns[ns] = ns_cfg if ns_cfg else {}
+                sub_key = op.get('subscription_key', op_key)
+                sub = {'name': op['subscription_name'], 'namespace': op['namespace']}
+                if op.get('source') and op['source'] != 'redhat-operators':
+                    sub['source'] = op['source']
+                gpu_subs[sub_key] = sub
+                if op_key in INFRA_CHARTS:
+                    ic = INFRA_CHARTS[op_key]
+                    gpu_apps[ic['chart_name']] = {
+                        'name': ic['chart_name'],
+                        'namespace': ic['namespace'],
+                        'project': group_name,
+                        'path': f'charts/{ic["chart_name"]}',
+                    }
+            gpu_data = {'clusterGroup': {
+                'namespaces': gpu_ns,
+                'subscriptions': gpu_subs,
+                'applications': gpu_apps,
+            }}
+            gpu_path = overrides_dir / 'values-gpu.yaml'
+            with open(gpu_path, 'w') as f:
+                f.write('# Generated by quickpat compose -- do not edit\n')
+                import yaml as _yaml
+                _yaml.dump(gpu_data, f, default_flow_style=False, sort_keys=False)
+
+        if 'cpu' in devices:
+            cpu_path = overrides_dir / 'values-cpu.yaml'
+            cpu_path.write_text(
+                '# Generated by quickpat compose -- do not edit\n'
+                '# CPU deployment — no GPU operators.\n'
+                '# Set model resources appropriate for CPU inference.\n'
+            )
+
+        # ── Upstream application-specific override file ──────────────────────
+        # upstream.extraValues in the spec → overrides/<app-name>.yaml
+        upstream_extra = self.config.get('upstream_extra_values', {})
+        if upstream_extra:
+            app_name = self.config.get('app_name', self.analysis.name)
+            extra_path = overrides_dir / f'{app_name}.yaml'
+            with open(extra_path, 'w') as f:
+                f.write('# Generated by quickpat compose -- do not edit\n')
+                import yaml as _yaml
+                _yaml.dump(upstream_extra, f, default_flow_style=False, sort_keys=False)
 
     # ── remote strategy: secrets chart ─────────────────────────────
 
