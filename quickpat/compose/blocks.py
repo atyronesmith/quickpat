@@ -43,6 +43,13 @@ BLOCK_TYPES = {
         'operators': [],
         'needs_oai_labels': False,
     },
+    'llama-stack': {
+        # LlamaStack operator is enabled via DSC (llamastackoperator: Managed).
+        # The compiler injects that DSC component automatically when this block
+        # is present — no separate subscription needed.
+        'operators': [],
+        'needs_oai_labels': True,
+    },
 }
 
 

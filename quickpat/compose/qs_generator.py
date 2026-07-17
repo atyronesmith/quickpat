@@ -19,6 +19,7 @@ from .block_templates import (
     model_serving_templates,
     object_storage_templates,
     data_pipeline_templates,
+    llama_stack_templates,
     guardrails_orchestrator_templates,
     build_values,
     build_notes,
@@ -103,6 +104,11 @@ class QSGenerator:
                 templates = guardrails_orchestrator_templates(block_name, cfg)
             elif btype == 'vector-store':
                 templates = self._vector_store_templates(block_name, cfg)
+            elif btype == 'llama-stack':
+                templates = llama_stack_templates(
+                    block_name, cfg,
+                    resolved_inputs=self._resolve_inputs(block),
+                )
             elif btype == 'data-pipeline':
                 templates = data_pipeline_templates(
                     block_name, cfg,

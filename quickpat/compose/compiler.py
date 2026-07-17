@@ -92,11 +92,20 @@ def compile_spec(
     #    config-driven DSC and ClusterPolicy CRs rather than hardcoded defaults.
     dsc_config = {}
     gpu_config = {}
+    has_llama_stack = False
     for block_name, block in spec.blocks.items():
         if block.block_type == 'ai-platform-foundation':
             dsc_config = block.config.get('dsc', {})
         elif block.block_type == 'gpu-compute':
             gpu_config = block.config
+        elif block.block_type == 'llama-stack':
+            has_llama_stack = True
+
+    # When a llama-stack block is present, ensure llamastackoperator is Managed
+    # in the DSC so the RHOAI operator installs and manages the LlamaStack runtime.
+    if has_llama_stack:
+        dsc_config = dict(dsc_config)
+        dsc_config.setdefault('llamastackoperator', 'Managed')
 
     # 6. Detect hand-written charts in the application repo.
     #    Any custom component that already has a Chart.yaml next to spec.yaml
