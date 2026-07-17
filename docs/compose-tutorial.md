@@ -431,18 +431,62 @@ in environments with strict RBAC policies — you must pre-create the SA manuall
 
 ---
 
+## Spec metadata fields
+
+```yaml
+metadata:
+  name: my-app
+  tier: sandbox           # sandbox | tested | maintained
+
+  # devices: deployment modes the app supports.
+  # When declared, generates values-gpu.yaml and values-cpu.yaml device overrides.
+  # GPU operators (NFD, NVIDIA) move OUT of values-prod.yaml INTO values-gpu.yaml.
+  # At deploy time: set global.device=gpu or global.device=cpu.
+  devices: [cpu, gpu]
+
+  upstream:
+    repo: https://github.com/rh-ai-quickstart/RAG.git
+    path: deploy/helm/rag
+    branch: main
+
+    # extraValues: application-specific values for the upstream chart.
+    # Written to overrides/<app-name>.yaml and passed via extraValueFiles
+    # in the ArgoCD app entry. Use for things outside the block model —
+    # pipeline config, sample data, model parameters.
+    extraValues:
+      llm-service:
+        secret:
+          enabled: false
+      configure-pipeline:
+        sampleFileUpload:
+          enabled: true
+
+    # ignoreDifferences: resources the upstream chart manages at runtime.
+    # Copied directly into the ArgoCD app entry's ignoreDifferences list.
+    ignoreDifferences:
+      - group: datasciencepipelinesapplications.opendatahub.io
+        kind: DataSciencePipelinesApplication
+        jsonPointers: [/spec]
+      - group: route.openshift.io
+        kind: Route
+        jsonPointers: [/spec/host]
+```
+
+---
+
 ## Block reference
 
-| Block type | Operators installed | QS templates generated | VP local charts |
+| Block type | Operators installed | VP DSC injection | QS templates generated |
 |---|---|---|---|
-| `ai-platform-foundation` | openshift-ai, serverless, servicemesh | prereqs in NOTES.txt | dsc (DataScienceCluster CR) |
-| `gpu-compute` | nvidia-gpu, nfd | prereqs in NOTES.txt | nfd (NodeFeatureDiscovery CR), nvidia-config (ClusterPolicy) |
-| `model-serving` | — | ServingRuntime + InferenceService | None (upstream QS chart) |
-| `object-storage` | — | Provider-conditional (see below) | None (upstream QS chart) |
-| `guardrails-orchestrator` | — | GuardrailsOrchestrator CR + ConfigMap | None (upstream QS chart) |
-| `vector-store` | — | pgvector Deployment + Service + Secret | None |
-| `data-pipeline` | openshift-pipelines | Tekton Pipeline (partial) | None |
-| `sso-auth` | — | Keycloak CR + Realm + RBAC | None |
+| `ai-platform-foundation` | openshift-ai, serverless, servicemesh | configured from spec | prereqs in NOTES.txt |
+| `gpu-compute` | nvidia-gpu, nfd (→ device override when `devices` declared) | ClusterPolicy | prereqs in NOTES.txt |
+| `model-serving` | — | — | ServingRuntime + InferenceService |
+| `object-storage` | — | — | Provider-conditional (see below) |
+| `guardrails-orchestrator` | — | `trustyai: Managed` (via ai-platform-foundation) | GuardrailsOrchestrator CR + ConfigMap |
+| `vector-store` | — | — | pgvector Deployment + Service + Secret |
+| `data-pipeline` | openshift-pipelines | `datasciencepipelines: Managed` (via ai-platform-foundation) | Tekton Pipeline + Task + RBAC + trigger |
+| `llama-stack` | — | `llamastackoperator: Managed` (auto-injected) | Deployment + Service |
+| `sso-auth` | — | — | Keycloak CR + Realm + RBAC |
 
 ### object-storage QS templates by provider
 
@@ -456,12 +500,29 @@ in environments with strict RBAC policies — you must pre-create the SA manuall
 | `credentials.yaml` | ✅ from `.Values.secrets.*` | — | ✅ from `.Values.secrets.*` |
 | `data-connection.yaml` | ✅ endpoint from service name | ✅ written by setup Job | ✅ endpoint from `.Values.<key>.endpoint` |
 
+### data-pipeline block inputs
+
+The data-pipeline block is the only block type with explicit input dependencies.
+It must declare which block provides the vector store and which provides object storage:
+
+```yaml
+ingest:
+  type: data-pipeline
+  config:
+    sources:
+      - name: docs
+        type: s3
+    schedule: manual   # manual | hourly | daily
+    chunk_size: 512
+  inputs:
+    vector_store: db        # block name that provides pgvector endpoint + secret
+    object_storage: store   # block name that provides S3 endpoint + credentials
+```
+
+The compiler resolves the input block references and wires the correct endpoints,
+database names, bucket names, and Secret references into the Tekton Pipeline params.
+
 ## What compose doesn't do yet
 
-- Data pipeline QS templates — `ingest/` directory is created but Tekton Pipeline
-  templates are minimal. The `configure-pipeline` initial bucket setup (for RAG)
-  is now handled by the bucket-init container in the MinIO Deployment.
-- Per-instance local chart generation for `model-serving` in VP output — when
-  you want decomposed ArgoCD apps instead of the upstream chart, this is Phase 2.
-- External Helm chart dependencies in QS output — the compiler always generates
-  inline templates rather than pulling from `ai-architecture-charts`.
+- Per-instance local chart generation for `model-serving` in VP output — the upstream QS chart is the application source (Level 1). Level 2 would give each block its own ArgoCD app.
+- External Helm chart dependencies in QS output — the compiler generates inline templates rather than pulling from `ai-architecture-charts`. Inline is self-contained and portable; external deps are a future optimization.
