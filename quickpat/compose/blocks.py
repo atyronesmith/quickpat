@@ -12,6 +12,11 @@ BLOCK_TYPES = {
     'ai-platform-foundation': {
         'operators': ['openshift-ai', 'serverless', 'servicemesh'],
         'needs_oai_labels': False,
+        # config.dsc: optional map of DSC component name → managementState string.
+        # e.g. {trustyai: Managed, datasciencepipelines: Removed}
+        # Merged over the default DSC CR at generation time. Omit to use
+        # conservative defaults (kserve + dashboard only). Required when the
+        # application uses TrustyAI guardrails or DataScience Pipelines.
     },
     'gpu-compute': {
         'operators': ['nvidia-gpu', 'nfd'],

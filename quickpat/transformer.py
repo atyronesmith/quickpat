@@ -206,7 +206,7 @@ def _render_external_secret(
     """Generate an ExternalSecret CRD template for a secret group."""
     return (
         f'{{{{- if .Values.secretStore }}}}\n'
-        f'apiVersion: "external-secrets.io/v1beta1"\n'
+        f'apiVersion: "external-secrets.io/v1"\n'
         f'kind: ExternalSecret\n'
         f'metadata:\n'
         f'  name: {{{{- include "{prefix}.fullname" . }}}}-{group_name}-secret\n'

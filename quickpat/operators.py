@@ -104,7 +104,7 @@ INFRA_CHARTS = {
                     'modelmeshserving': {},
                     'ray': {'managementState': 'Removed'},
                     'trainingoperator': {'managementState': 'Removed'},
-                    'trustyai': {'managementState': 'Managed'},
+                    'trustyai': {},
                     'workbenches': {'managementState': 'Removed'},
                 },
             },
