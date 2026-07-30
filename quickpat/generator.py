@@ -43,6 +43,7 @@ class PatternGenerator:
         self._generate_readme()
         self._generate_report()
         self._generate_license()
+        self._generate_spec_docs()
 
         # Copy charts with local strategy (per-chart or global default)
         default_strategy = self.config.get('chart_strategy', 'remote')
@@ -924,6 +925,20 @@ podman run -it --rm --pull=newer \
             'See http://www.apache.org/licenses/LICENSE-2.0 for full terms.\n'
         )
         (self.output_dir / 'LICENSE').write_text(content)
+
+    def _generate_spec_docs(self):
+        """Process and write spec docs: entries into the VP output directory.
+
+        Runs after _generate_readme() so spec-authored docs overwrite the
+        auto-generated README when target: README.md is declared.
+        """
+        from .compose.doc_filter import process_docs
+        process_docs(
+            doc_entries=self.config.get('docs', []),
+            spec_dir=self.config.get('spec_dir'),
+            output_dir=self.output_dir,
+            deploy_mode='vp',
+        )
 
     # ── overrides/ ──────────────────────────────────────────────────
 

@@ -32,6 +32,22 @@ class SecretField:
 
 
 @dataclass
+class DocEntry:
+    """A documentation file to be processed and written into the generated output.
+
+    source: path relative to spec.yaml location (e.g. 'docs/README.md')
+    target: output path inside vp-out/ or qs-out/ (e.g. 'README.md')
+    deploy: 'both' (default) | 'vp' | 'qs'
+            Controls which generated output receives this file.
+            Sections within the file can be further filtered with
+            <!-- vp-only --> / <!-- qs-only --> / <!-- end --> markers.
+    """
+    source: str
+    target: str
+    deploy: str = 'both'
+
+
+@dataclass
 class TopLevelSecret:
     """A named secret group in the spec's top-level secrets: list.
 
@@ -92,6 +108,7 @@ class ApplicationSpec:
     devices: list = field(default_factory=list)   # [cpu, gpu, hpu] — deployment device modes
     vault_enabled: bool = False                   # vault: {enabled: true} in spec
     top_level_secrets: list = field(default_factory=list)  # list of TopLevelSecret
+    docs: list = field(default_factory=list)      # list of DocEntry
 
 
 VALID_TIERS = {'sandbox', 'tested', 'maintained'}
@@ -146,6 +163,7 @@ def load_application_spec(path: str) -> ApplicationSpec:
     vault_enabled = bool(vault_raw.get('enabled', False))
 
     top_level_secrets = _parse_top_level_secrets(raw.get('secrets', []) or [])
+    docs = _parse_docs(raw.get('docs', []) or [])
 
     return ApplicationSpec(
         name=meta['name'],
@@ -158,6 +176,7 @@ def load_application_spec(path: str) -> ApplicationSpec:
         devices=devices,
         vault_enabled=vault_enabled,
         top_level_secrets=top_level_secrets,
+        docs=docs,
     )
 
 
@@ -233,6 +252,35 @@ def _parse_custom(raw: dict) -> dict:
         )
 
     return custom
+
+
+_VALID_DOC_DEPLOY = {'both', 'vp', 'qs'}
+
+
+def _parse_docs(raw: list) -> list:
+    """Parse the docs: list into DocEntry objects."""
+    if not isinstance(raw, list):
+        raise AppSpecError("'docs' must be a list")
+
+    docs = []
+    for i, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            raise AppSpecError(f"docs[{i}] must be a mapping")
+        if 'source' not in entry:
+            raise AppSpecError(f"docs[{i}]: missing 'source'")
+        if 'target' not in entry:
+            raise AppSpecError(f"docs[{i}]: missing 'target'")
+        deploy = entry.get('deploy', 'both')
+        if deploy not in _VALID_DOC_DEPLOY:
+            raise AppSpecError(
+                f"docs[{i}].deploy must be one of {sorted(_VALID_DOC_DEPLOY)}, got {deploy!r}"
+            )
+        docs.append(DocEntry(
+            source=entry['source'],
+            target=entry['target'],
+            deploy=deploy,
+        ))
+    return docs
 
 
 def _parse_top_level_secrets(raw: list) -> list:

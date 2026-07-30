@@ -54,6 +54,7 @@ class QSGenerator:
         self._write_custom_components()
         self._write_create_secrets_sh(secret_decls)
         self._write_readme(prereqs)
+        self._write_spec_docs()
 
     # ── Chart.yaml ───────────────────────────────────────────────────────────
 
@@ -340,3 +341,17 @@ stringData:
             elif block.block_type == 'gpu-compute':
                 prereqs.extend(gpu_compute_prereqs(cfg))
         return prereqs
+
+    def _write_spec_docs(self):
+        """Process and write spec docs: entries into the QS output directory.
+
+        Runs after _write_readme() so spec-authored docs overwrite the
+        auto-generated README when target: README.md is declared.
+        """
+        from .doc_filter import process_docs
+        process_docs(
+            doc_entries=self.config.get('docs', []),
+            spec_dir=self.config.get('spec_dir'),
+            output_dir=self.output_dir,
+            deploy_mode='qs',
+        )

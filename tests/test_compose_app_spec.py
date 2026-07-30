@@ -895,3 +895,235 @@ class TestVP2SecretTemplate:
         for secret in tmpl['secrets']:
             for f in secret['fields']:
                 assert 'onMissingValue' not in f
+
+
+# ── Doc filtering and spec docs pipeline ─────────────────────────────────────
+
+from quickpat.compose.doc_filter import filter_doc
+
+
+class TestDocFilter:
+    """Unit tests for the marker-based doc filter."""
+
+    def test_vp_only_excluded_from_qs(self):
+        content = "shared\n<!-- vp-only -->\nvp content\n<!-- end -->\nshared"
+        assert 'vp content' not in filter_doc(content, 'qs')
+
+    def test_vp_only_included_in_vp(self):
+        content = "shared\n<!-- vp-only -->\nvp content\n<!-- end -->\nshared"
+        assert 'vp content' in filter_doc(content, 'vp')
+
+    def test_qs_only_excluded_from_vp(self):
+        content = "shared\n<!-- qs-only -->\nqs content\n<!-- end -->\nshared"
+        assert 'qs content' not in filter_doc(content, 'vp')
+
+    def test_qs_only_included_in_qs(self):
+        content = "shared\n<!-- qs-only -->\nqs content\n<!-- end -->\nshared"
+        assert 'qs content' in filter_doc(content, 'qs')
+
+    def test_shared_content_in_both_vp(self):
+        content = "shared line"
+        assert 'shared line' in filter_doc(content, 'vp')
+
+    def test_shared_content_in_both_qs(self):
+        content = "shared line"
+        assert 'shared line' in filter_doc(content, 'qs')
+
+    def test_marker_lines_stripped_from_vp(self):
+        content = "<!-- vp-only -->\ncontent\n<!-- end -->"
+        result = filter_doc(content, 'vp')
+        assert '<!-- vp-only -->' not in result
+        assert '<!-- end -->' not in result
+
+    def test_marker_lines_stripped_from_qs(self):
+        content = "<!-- qs-only -->\ncontent\n<!-- end -->"
+        result = filter_doc(content, 'qs')
+        assert '<!-- qs-only -->' not in result
+        assert '<!-- end -->' not in result
+
+    def test_multiple_sections(self):
+        content = (
+            "intro\n"
+            "<!-- vp-only -->\nvp section\n<!-- end -->\n"
+            "middle\n"
+            "<!-- qs-only -->\nqs section\n<!-- end -->\n"
+            "outro"
+        )
+        vp = filter_doc(content, 'vp')
+        qs = filter_doc(content, 'qs')
+        assert 'vp section' in vp and 'qs section' not in vp
+        assert 'qs section' in qs and 'vp section' not in qs
+        assert 'intro' in vp and 'intro' in qs
+        assert 'middle' in vp and 'middle' in qs
+        assert 'outro' in vp and 'outro' in qs
+
+    def test_case_insensitive_markers(self):
+        content = "<!-- VP-Only -->\nvp\n<!-- END -->"
+        assert 'vp' in filter_doc(content, 'vp')
+        assert 'vp' not in filter_doc(content, 'qs')
+
+    def test_whitespace_around_markers(self):
+        content = "  <!-- vp-only -->  \nvp\n  <!-- end -->  "
+        assert 'vp' in filter_doc(content, 'vp')
+        assert 'vp' not in filter_doc(content, 'qs')
+
+    def test_invalid_deploy_mode_raises(self):
+        import pytest
+        with pytest.raises(ValueError, match="deploy_mode"):
+            filter_doc("content", "both")
+
+
+_DOCS_SPEC = """\
+apiVersion: supplychain/v1alpha1
+kind: ApplicationSpec
+metadata:
+  name: docs-test
+  tier: sandbox
+  upstream: {}
+blocks: {}
+wiring: []
+vault:
+  enabled: true
+custom: {}
+docs:
+  - source: docs/guide.md
+    target: README.md
+  - source: docs/vp-notes.md
+    target: docs/vp-notes.md
+    deploy: vp
+  - source: docs/qs-notes.md
+    target: docs/qs-notes.md
+    deploy: qs
+"""
+
+_GUIDE_MD = """\
+# Guide
+
+## Overview
+Shared overview content.
+
+<!-- vp-only -->
+## Validated Pattern Setup
+Run ./vp-out/pattern.sh make install
+<!-- end -->
+
+<!-- qs-only -->
+## Quickstart Setup
+Run make keycloak
+<!-- end -->
+
+## Architecture
+Shared architecture content.
+"""
+
+
+class TestSpecDocsPipeline:
+    def _setup_spec(self, tmp_path):
+        spec_file = tmp_path / 'spec.yaml'
+        spec_file.write_text(_DOCS_SPEC)
+        docs_dir = tmp_path / 'docs'
+        docs_dir.mkdir()
+        (docs_dir / 'guide.md').write_text(_GUIDE_MD)
+        (docs_dir / 'vp-notes.md').write_text('VP-only notes file.')
+        (docs_dir / 'qs-notes.md').write_text('QS-only notes file.')
+        return spec_file
+
+    def test_readme_written_to_vp_out(self, tmp_path):
+        spec_file = self._setup_spec(tmp_path)
+        result = compose_from_spec(str(spec_file), output_dir=str(tmp_path / 'vp-out'))
+        assert result.success
+        assert (tmp_path / 'vp-out' / 'README.md').exists()
+
+    def test_vp_section_in_vp_readme(self, tmp_path):
+        spec_file = self._setup_spec(tmp_path)
+        compose_from_spec(str(spec_file), output_dir=str(tmp_path / 'vp-out'))
+        readme = (tmp_path / 'vp-out' / 'README.md').read_text()
+        assert 'Validated Pattern Setup' in readme
+        assert 'pattern.sh make install' in readme
+
+    def test_qs_section_absent_from_vp_readme(self, tmp_path):
+        spec_file = self._setup_spec(tmp_path)
+        compose_from_spec(str(spec_file), output_dir=str(tmp_path / 'vp-out'))
+        readme = (tmp_path / 'vp-out' / 'README.md').read_text()
+        assert 'Quickstart Setup' not in readme
+        assert 'make keycloak' not in readme
+
+    def test_shared_content_in_vp_readme(self, tmp_path):
+        spec_file = self._setup_spec(tmp_path)
+        compose_from_spec(str(spec_file), output_dir=str(tmp_path / 'vp-out'))
+        readme = (tmp_path / 'vp-out' / 'README.md').read_text()
+        assert 'Shared overview content' in readme
+        assert 'Shared architecture content' in readme
+
+    def test_no_marker_comments_in_vp_readme(self, tmp_path):
+        spec_file = self._setup_spec(tmp_path)
+        compose_from_spec(str(spec_file), output_dir=str(tmp_path / 'vp-out'))
+        readme = (tmp_path / 'vp-out' / 'README.md').read_text()
+        assert '<!-- vp-only -->' not in readme
+        assert '<!-- qs-only -->' not in readme
+        assert '<!-- end -->' not in readme
+
+    def test_readme_written_to_qs_out(self, tmp_path):
+        spec_file = self._setup_spec(tmp_path)
+        from quickpat.pipeline import compose_qs_from_spec
+        result = compose_qs_from_spec(str(spec_file), output_dir=str(tmp_path / 'qs-out'))
+        assert result.success
+        assert (tmp_path / 'qs-out' / 'README.md').exists()
+
+    def test_qs_section_in_qs_readme(self, tmp_path):
+        spec_file = self._setup_spec(tmp_path)
+        from quickpat.pipeline import compose_qs_from_spec
+        compose_qs_from_spec(str(spec_file), output_dir=str(tmp_path / 'qs-out'))
+        readme = (tmp_path / 'qs-out' / 'README.md').read_text()
+        assert 'Quickstart Setup' in readme
+        assert 'make keycloak' in readme
+
+    def test_vp_section_absent_from_qs_readme(self, tmp_path):
+        spec_file = self._setup_spec(tmp_path)
+        from quickpat.pipeline import compose_qs_from_spec
+        compose_qs_from_spec(str(spec_file), output_dir=str(tmp_path / 'qs-out'))
+        readme = (tmp_path / 'qs-out' / 'README.md').read_text()
+        assert 'Validated Pattern Setup' not in readme
+        assert 'pattern.sh make install' not in readme
+
+    def test_vp_deploy_file_in_vp_out(self, tmp_path):
+        spec_file = self._setup_spec(tmp_path)
+        compose_from_spec(str(spec_file), output_dir=str(tmp_path / 'vp-out'))
+        assert (tmp_path / 'vp-out' / 'docs' / 'vp-notes.md').exists()
+
+    def test_vp_deploy_file_absent_from_qs_out(self, tmp_path):
+        spec_file = self._setup_spec(tmp_path)
+        from quickpat.pipeline import compose_qs_from_spec
+        compose_qs_from_spec(str(spec_file), output_dir=str(tmp_path / 'qs-out'))
+        assert not (tmp_path / 'qs-out' / 'docs' / 'vp-notes.md').exists()
+
+    def test_qs_deploy_file_in_qs_out(self, tmp_path):
+        spec_file = self._setup_spec(tmp_path)
+        from quickpat.pipeline import compose_qs_from_spec
+        compose_qs_from_spec(str(spec_file), output_dir=str(tmp_path / 'qs-out'))
+        assert (tmp_path / 'qs-out' / 'docs' / 'qs-notes.md').exists()
+
+    def test_qs_deploy_file_absent_from_vp_out(self, tmp_path):
+        spec_file = self._setup_spec(tmp_path)
+        compose_from_spec(str(spec_file), output_dir=str(tmp_path / 'vp-out'))
+        assert not (tmp_path / 'vp-out' / 'docs' / 'qs-notes.md').exists()
+
+    def test_missing_source_does_not_crash(self, tmp_path):
+        spec_with_missing = _DOCS_SPEC.replace(
+            'source: docs/guide.md', 'source: docs/nonexistent.md'
+        )
+        spec_file = tmp_path / 'spec.yaml'
+        spec_file.write_text(spec_with_missing)
+        (tmp_path / 'docs').mkdir()
+        import warnings
+        with warnings.catch_warnings(record=True):
+            result = compose_from_spec(str(spec_file), output_dir=str(tmp_path / 'vp-out'))
+        assert result.success  # missing doc is a warning, not a fatal error
+
+    def test_invalid_deploy_value_raises(self, tmp_path):
+        bad_spec = _DOCS_SPEC.replace('deploy: vp', 'deploy: invalid')
+        spec_file = tmp_path / 'spec.yaml'
+        spec_file.write_text(bad_spec)
+        from quickpat.compose.parser import load_application_spec, AppSpecError
+        with pytest.raises(AppSpecError, match="deploy.*must be"):
+            load_application_spec(str(spec_file))
