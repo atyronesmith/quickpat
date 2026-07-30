@@ -81,10 +81,52 @@ OPERATORS = {
         'indicators': ['kafka', 'kafkatopic', 'kafkaconnect', 'amq-streams'],
         'co_dependencies': [],
     },
+    'openshift-virtualization': {
+        'subscription_name': 'kubevirt-hyperconverged',
+        'display_name': 'OpenShift Virtualization',
+        'namespace': 'openshift-cnv',
+        'channel': 'stable',
+        'source': 'redhat-operators',
+        'indicators': ['kubevirt', 'virtualmachine', 'vmi', 'datavolume', 'hyperconverged', 'cdi', 'cnv'],
+        'co_dependencies': [],
+        'namespace_config': {
+            'operatorGroup': True,
+            'targetNamespaces': ['openshift-cnv'],
+        },
+    },
+    'rhbk': {
+        'subscription_name': 'rhbk-operator',
+        'display_name': 'Red Hat Build of Keycloak',
+        'namespace': 'openshell-agents',
+        'channel': 'stable-v26',
+        'source': 'redhat-operators',
+        'indicators': ['keycloak', 'keycloakrealmimport', 'rhbk', 'oidc-provider'],
+        'co_dependencies': [],
+        'namespace_config': {
+            'operatorGroup': True,
+            'targetNamespaces': ['openshell-agents'],
+        },
+    },
 }
 
 
 INFRA_CHARTS = {
+    'openshift-virtualization': {
+        'chart_name': 'openshift-cnv',
+        'description': 'HyperConverged CR to activate OpenShift Virtualization (KubeVirt + CDI)',
+        'namespace': 'openshift-cnv',
+        'template_name': 'hyperconverged.yaml',
+        'cr': {
+            'apiVersion': 'hco.kubevirt.io/v1beta1',
+            'kind': 'HyperConverged',
+            'metadata': {'name': 'kubevirt-hyperconverged'},
+            'spec': {},
+        },
+    },
+    # rhbk intentionally has no INFRA_CHART entry.
+    # The keycloak-oidc block installs the operator; the Keycloak CR, PostgreSQL,
+    # and KeycloakRealmImport are pattern-specific (realm name, client config,
+    # test users). Patterns should supply a hand-written chart for those resources.
     'openshift-ai': {
         'chart_name': 'dsc',
         'description': 'DataScienceCluster configuration for RHOAI',

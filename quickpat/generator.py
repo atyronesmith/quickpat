@@ -135,6 +135,11 @@ class PatternGenerator:
                 result.append((ci.name, ns, ci))
             return result
         ci = self.analysis.charts[0]
+        # Skip the main chart if it's a remote strategy with no upstream URL —
+        # all components are custom charts; there's no upstream app to reference.
+        if (ci.strategy or self.config.get('chart_strategy', 'remote')) == 'remote':
+            if not self.config.get('git_repo_url', ''):
+                return []
         app_name = self.config.get('app_name', self.analysis.name)
         app_ns = ns_overrides.get(ci.name, self.config.get('app_namespace', self.analysis.name))
         return [(app_name, app_ns, ci)]
@@ -210,6 +215,8 @@ class PatternGenerator:
                 'name': op['subscription_name'],
                 'namespace': op['namespace'],
             }
+            if op.get('channel'):
+                sub['channel'] = op['channel']
             if op.get('source') and op['source'] != 'redhat-operators':
                 sub['source'] = op['source']
             subscriptions[sub_key] = sub
@@ -278,8 +285,11 @@ class PatternGenerator:
                     'path': f'charts/{name}',
                 }
             elif strategy == 'remote':
-                has_remote = True
                 git_url = self.config.get('git_repo_url', '')
+                if not git_url:
+                    # No upstream repo — all components are custom charts; skip remote app.
+                    continue
+                has_remote = True
                 chart_path = self.config.get('chart_path_in_repo', '') or '.'
                 app_entry = {
                     'name': name,
@@ -336,14 +346,18 @@ class PatternGenerator:
         # Custom component stubs — one ArgoCD app per component, pointing at
         # charts/<comp-name>/ which _generate_custom_component_stubs creates.
         custom_components = self.config.get('custom_components', {})
-        comp_namespace = self.config.get('app_namespace', self.analysis.name)
-        for comp_name in custom_components:
-            applications[comp_name] = {
+        default_namespace = self.config.get('app_namespace', self.analysis.name)
+        for comp_name, comp in custom_components.items():
+            ns = (comp.namespace or default_namespace) if hasattr(comp, 'namespace') else default_namespace
+            app_entry = {
                 'name': comp_name,
-                'namespace': comp_namespace,
+                'namespace': ns,
                 'project': group_name,
                 'path': f'charts/{comp_name}',
             }
+            if hasattr(comp, 'extra_value_files') and comp.extra_value_files:
+                app_entry['extraValueFiles'] = comp.extra_value_files
+            applications[comp_name] = app_entry
 
         return applications
 

@@ -9,6 +9,33 @@
 # The compiler's job is to collect the right operator set from the blocks.
 
 BLOCK_TYPES = {
+    # --- VM / Identity blocks ---
+
+    'openshift-virtualization': {
+        # Installs the kubevirt-hyperconverged operator and creates a HyperConverged CR.
+        # Provides the KubeVirt runtime and CDI (Containerized Data Importer) that
+        # vm-workspace blocks depend on for per-user VM provisioning.
+        # outputs: none (runtime dependency, no URL/host produced)
+        'operators': ['openshift-virtualization'],
+        'needs_oai_labels': False,
+    },
+    'keycloak-oidc': {
+        # Installs RHBK (Red Hat Build of Keycloak) and creates a Keycloak CR +
+        # KeycloakRealmImport. The realm name, test users, and client config come
+        # from block config. Outputs the OIDC issuer URL for downstream consumers.
+        # outputs: issuer_url (used by vm-workspace inputs.oidc_issuer)
+        'operators': ['rhbk'],
+        'needs_oai_labels': False,
+    },
+    'vm-workspace': {
+        # Provisions per-user KubeVirt VMs from a CDI DataSource (golden image).
+        # Each VM runs the configured gateway + agent. The namespace_mode config
+        # controls whether all sandboxes share one namespace or each gets its own.
+        # Requires openshift-virtualization block in the same spec.
+        # outputs: gateway_route (gRPC/TLS passthrough), dashboard_route (edge TLS)
+        'operators': [],
+        'needs_oai_labels': False,
+    },
     'ai-platform-foundation': {
         'operators': ['openshift-ai', 'serverless', 'servicemesh'],
         'needs_oai_labels': False,

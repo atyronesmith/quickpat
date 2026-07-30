@@ -40,6 +40,8 @@ class BlockInstance:
 class CustomComponent:
     name: str
     image: str
+    namespace: str = ''
+    extra_value_files: list = field(default_factory=list)
     replicas: int = 1
     ports: list = field(default_factory=list)
     env: dict = field(default_factory=dict)
@@ -181,6 +183,8 @@ def _parse_custom(raw: dict) -> dict:
         custom[comp_name] = CustomComponent(
             name=comp_name,
             image=image,
+            namespace=comp_raw.get('namespace', ''),
+            extra_value_files=comp_raw.get('extraValueFiles', []),
             replicas=comp_raw.get('replicas', 1),
             ports=comp_raw.get('ports', []),
             env=comp_raw.get('env', {}),
