@@ -348,6 +348,10 @@ class PatternGenerator:
         custom_components = self.config.get('custom_components', {})
         default_namespace = self.config.get('app_namespace', self.analysis.name)
         for comp_name, comp in custom_components.items():
+            # Skip components marked deploy: manual — chart lives in the repo
+            # for reference / manual apply, but is not ArgoCD-managed.
+            if hasattr(comp, 'deploy') and comp.deploy == 'manual':
+                continue
             ns = (comp.namespace or default_namespace) if hasattr(comp, 'namespace') else default_namespace
             app_entry = {
                 'name': comp_name,
@@ -367,6 +371,12 @@ class PatternGenerator:
         if not self.config.get('use_vault'):
             return
 
+        # VP v2 format when top-level secrets are declared in spec
+        top_level_secrets = self.config.get('top_level_secrets', [])
+        if top_level_secrets:
+            self._generate_vp_v2_secret_template(top_level_secrets)
+            return
+
         # Remote strategy: grouped secrets by service name
         default_strategy = self.config.get('chart_strategy', 'remote')
         has_remote = any(
@@ -379,6 +389,31 @@ class PatternGenerator:
 
         # Local/external strategy: flat secret list
         self._generate_flat_secret_template()
+
+    def _generate_vp_v2_secret_template(self, top_level_secrets):
+        """Write values-secret.yaml.template in the VP v2 backingStore format.
+
+        This is the format expected by the VP secret loader:
+            https://validatedpatterns.io/learn/secrets-management-in-the-validated-patterns-framework/
+
+        Each TopLevelSecret in the spec maps to one entry under secrets: with
+        value: null as a placeholder for the user to fill in before deploying.
+        """
+        from pathlib import Path as _Path
+
+        secrets_entries = []
+        for secret in top_level_secrets:
+            fields = [{'name': f.name, 'value': None} for f in secret.fields]
+            if not fields:
+                fields = [{'name': 'value', 'value': None}]
+            secrets_entries.append({'name': secret.name, 'fields': fields})
+
+        doc = {
+            'version': '2.0',
+            'backingStore': 'vault',
+            'secrets': secrets_entries,
+        }
+        self._write_yaml(self.output_dir / 'values-secret.yaml.template', doc)
 
     def _generate_grouped_secret_template(self):
         """Generate values-secret.yaml.template with per-service grouping."""

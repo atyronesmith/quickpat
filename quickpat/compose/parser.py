@@ -27,6 +27,25 @@ class SecretDecl:
 
 
 @dataclass
+class SecretField:
+    name: str
+
+
+@dataclass
+class TopLevelSecret:
+    """A named secret group in the spec's top-level secrets: list.
+
+    Maps to one entry in values-secret.yaml.template.  vault_path is the
+    Vault key prefix (e.g. 'secure-agent-workspace/anthropic'); name is the
+    display name / last path segment used in the template.
+    """
+    name: str
+    vault_path: str = ''
+    on_missing: str = 'prompt'  # prompt | skip | generate
+    fields: list = field(default_factory=list)  # list of SecretField
+
+
+@dataclass
 class BlockInstance:
     name: str
     block_type: str
@@ -42,6 +61,10 @@ class CustomComponent:
     image: str
     namespace: str = ''
     extra_value_files: list = field(default_factory=list)
+    # 'argocd' (default) — creates an ArgoCD app in values-prod.yaml
+    # 'manual'           — chart is in the repo but NOT managed by ArgoCD
+    #                      (use for one-time build steps, pre-flight jobs, etc.)
+    deploy: str = 'argocd'
     replicas: int = 1
     ports: list = field(default_factory=list)
     env: dict = field(default_factory=dict)
@@ -66,7 +89,9 @@ class ApplicationSpec:
     blocks: dict   # name → BlockInstance (ordered)
     custom: dict   # name → CustomComponent
     wiring: list   # list of WiringEntry
-    devices: list = field(default_factory=list)  # [cpu, gpu, hpu] — deployment device modes
+    devices: list = field(default_factory=list)   # [cpu, gpu, hpu] — deployment device modes
+    vault_enabled: bool = False                   # vault: {enabled: true} in spec
+    top_level_secrets: list = field(default_factory=list)  # list of TopLevelSecret
 
 
 VALID_TIERS = {'sandbox', 'tested', 'maintained'}
@@ -117,6 +142,11 @@ def load_application_spec(path: str) -> ApplicationSpec:
     custom = _parse_custom(raw.get('custom', {}))
     wiring = _parse_wiring(raw.get('wiring', []))
 
+    vault_raw = raw.get('vault', {}) or {}
+    vault_enabled = bool(vault_raw.get('enabled', False))
+
+    top_level_secrets = _parse_top_level_secrets(raw.get('secrets', []) or [])
+
     return ApplicationSpec(
         name=meta['name'],
         description=meta.get('description', ''),
@@ -126,6 +156,8 @@ def load_application_spec(path: str) -> ApplicationSpec:
         custom=custom,
         wiring=wiring,
         devices=devices,
+        vault_enabled=vault_enabled,
+        top_level_secrets=top_level_secrets,
     )
 
 
@@ -180,11 +212,18 @@ def _parse_custom(raw: dict) -> dict:
         source = comp_raw.get('source', {})
         image = source.get('image', '') if isinstance(source, dict) else ''
 
+        deploy = comp_raw.get('deploy', 'argocd')
+        if deploy not in ('argocd', 'manual'):
+            raise AppSpecError(
+                f"custom.{comp_name}.deploy must be 'argocd' or 'manual', got {deploy!r}"
+            )
+
         custom[comp_name] = CustomComponent(
             name=comp_name,
             image=image,
             namespace=comp_raw.get('namespace', ''),
             extra_value_files=comp_raw.get('extraValueFiles', []),
+            deploy=deploy,
             replicas=comp_raw.get('replicas', 1),
             ports=comp_raw.get('ports', []),
             env=comp_raw.get('env', {}),
@@ -194,6 +233,62 @@ def _parse_custom(raw: dict) -> dict:
         )
 
     return custom
+
+
+def _parse_top_level_secrets(raw: list) -> list:
+    """Parse the top-level secrets: list into TopLevelSecret objects.
+
+    Each entry in the list describes one named secret group in Vault.
+    The generated values-secret.yaml.template will have one entry per group.
+
+    Example spec entry:
+        - name: anthropic
+          vault_path: mypattern/anthropic
+          onMissingValue: skip
+          fields:
+            - name: api_key
+
+    Produces template entry:
+        - name: anthropic
+          fields:
+          - name: api_key
+            value: null
+    """
+    if not isinstance(raw, list):
+        raise AppSpecError("'secrets' must be a list")
+
+    secrets = []
+    for i, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            raise AppSpecError(f"secrets[{i}] must be a mapping")
+        if 'name' not in entry:
+            raise AppSpecError(f"secrets[{i}]: missing 'name'")
+
+        raw_fields = entry.get('fields', []) or []
+        if not isinstance(raw_fields, list):
+            raise AppSpecError(f"secrets[{i}].fields must be a list")
+
+        parsed_fields = []
+        for j, f in enumerate(raw_fields):
+            if isinstance(f, str):
+                parsed_fields.append(SecretField(name=f))
+            elif isinstance(f, dict):
+                if 'name' not in f:
+                    raise AppSpecError(f"secrets[{i}].fields[{j}]: missing 'name'")
+                parsed_fields.append(SecretField(name=f['name']))
+            else:
+                raise AppSpecError(f"secrets[{i}].fields[{j}] must be a string or mapping")
+
+        name = entry['name']
+        vault_path = entry.get('vault_path', name)
+        secrets.append(TopLevelSecret(
+            name=name,
+            vault_path=vault_path,
+            on_missing=entry.get('onMissingValue', 'prompt'),
+            fields=parsed_fields,
+        ))
+
+    return secrets
 
 
 def _parse_wiring(raw: list) -> list:

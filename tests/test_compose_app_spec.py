@@ -552,3 +552,346 @@ class TestLemonadeStandRepo:
             output_dir=str(tmp_path / 'vp-out'),
         )
         assert (tmp_path / 'vp-out' / 'charts' / 'lemonade-stand-app' / 'templates' / 'deployment.yaml').exists()
+
+
+# ── Custom component namespace + extraValueFiles ──────────────────────────────
+
+_CUSTOM_NS_SPEC = """\
+apiVersion: supplychain/v1alpha1
+kind: ApplicationSpec
+metadata:
+  name: ns-test
+  tier: sandbox
+  upstream: {}
+blocks: {}
+wiring: []
+vault:
+  enabled: true
+custom:
+  app-one:
+    description: App in its own namespace
+    namespace: my-app-namespace
+    source:
+      chart: charts/app-one
+  app-two:
+    description: App with extraValueFiles
+    namespace: another-ns
+    extraValueFiles:
+      - /overrides/app-two-overrides.yaml
+    source:
+      chart: charts/app-two
+  app-default:
+    description: App with no namespace (uses pattern default)
+    source:
+      chart: charts/app-default
+"""
+
+
+class TestCustomComponentNamespace:
+    def test_explicit_namespace_in_argocd_app(self, tmp_path):
+        out = _compose(tmp_path, _CUSTOM_NS_SPEC)
+        apps = _read_yaml(out / 'values-prod.yaml')['clusterGroup']['applications']
+        assert apps['app-one']['namespace'] == 'my-app-namespace'
+
+    def test_second_explicit_namespace(self, tmp_path):
+        out = _compose(tmp_path, _CUSTOM_NS_SPEC)
+        apps = _read_yaml(out / 'values-prod.yaml')['clusterGroup']['applications']
+        assert apps['app-two']['namespace'] == 'another-ns'
+
+    def test_default_namespace_when_unset(self, tmp_path):
+        out = _compose(tmp_path, _CUSTOM_NS_SPEC)
+        apps = _read_yaml(out / 'values-prod.yaml')['clusterGroup']['applications']
+        # Falls back to pattern name when no namespace is declared
+        assert apps['app-default']['namespace'] == 'ns-test'
+
+    def test_extra_value_files_in_argocd_app(self, tmp_path):
+        out = _compose(tmp_path, _CUSTOM_NS_SPEC)
+        apps = _read_yaml(out / 'values-prod.yaml')['clusterGroup']['applications']
+        assert apps['app-two']['extraValueFiles'] == ['/overrides/app-two-overrides.yaml']
+
+    def test_no_extra_value_files_when_unset(self, tmp_path):
+        out = _compose(tmp_path, _CUSTOM_NS_SPEC)
+        apps = _read_yaml(out / 'values-prod.yaml')['clusterGroup']['applications']
+        assert 'extraValueFiles' not in apps['app-one']
+
+
+# ── Subscription channels ─────────────────────────────────────────────────────
+
+_VIRT_SPEC = """\
+apiVersion: supplychain/v1alpha1
+kind: ApplicationSpec
+metadata:
+  name: virt-test
+  tier: sandbox
+  upstream: {}
+blocks:
+  virt:
+    type: openshift-virtualization
+  identity:
+    type: keycloak-oidc
+wiring: []
+custom: {}
+"""
+
+
+class TestSubscriptionChannels:
+    def test_openshift_virtualization_channel(self, tmp_path):
+        out = _compose(tmp_path, _VIRT_SPEC)
+        subs = _read_yaml(out / 'values-prod.yaml')['clusterGroup']['subscriptions']
+        assert subs['openshift-virtualization']['channel'] == 'stable'
+
+    def test_rhbk_channel(self, tmp_path):
+        out = _compose(tmp_path, _VIRT_SPEC)
+        subs = _read_yaml(out / 'values-prod.yaml')['clusterGroup']['subscriptions']
+        assert subs['rhbk']['channel'] == 'stable-v26'
+
+    def test_rhbk_namespace(self, tmp_path):
+        out = _compose(tmp_path, _VIRT_SPEC)
+        subs = _read_yaml(out / 'values-prod.yaml')['clusterGroup']['subscriptions']
+        assert subs['rhbk']['namespace'] == 'openshell-agents'
+
+    def test_rhbk_operatorgroup_namespace(self, tmp_path):
+        out = _compose(tmp_path, _VIRT_SPEC)
+        namespaces = _read_yaml(out / 'values-prod.yaml')['clusterGroup']['namespaces']
+        assert namespaces.get('openshell-agents', {}).get('operatorGroup') is True
+
+
+# ── Empty upstream — no orphan remote app or namespace ────────────────────────
+
+_EMPTY_UPSTREAM_SPEC = """\
+apiVersion: supplychain/v1alpha1
+kind: ApplicationSpec
+metadata:
+  name: custom-only
+  tier: sandbox
+  upstream: {}
+blocks: {}
+wiring: []
+vault:
+  enabled: true
+custom:
+  my-app:
+    namespace: my-ns
+    source:
+      chart: charts/my-app
+"""
+
+
+class TestEmptyUpstream:
+    def test_no_remote_argocd_app(self, tmp_path):
+        out = _compose(tmp_path, _EMPTY_UPSTREAM_SPEC)
+        apps = _read_yaml(out / 'values-prod.yaml')['clusterGroup']['applications']
+        # Only my-app, vault, and openshift-external-secrets should be present
+        assert 'custom-only' not in apps
+
+    def test_no_orphan_namespace(self, tmp_path):
+        out = _compose(tmp_path, _EMPTY_UPSTREAM_SPEC)
+        namespaces = _read_yaml(out / 'values-prod.yaml')['clusterGroup']['namespaces']
+        assert 'custom-only' not in namespaces
+
+    def test_custom_app_present(self, tmp_path):
+        out = _compose(tmp_path, _EMPTY_UPSTREAM_SPEC)
+        apps = _read_yaml(out / 'values-prod.yaml')['clusterGroup']['applications']
+        assert 'my-app' in apps
+        assert apps['my-app']['namespace'] == 'my-ns'
+
+
+# ── deploy: manual — excluded from ArgoCD apps ───────────────────────────────
+
+_MANUAL_DEPLOY_SPEC = """\
+apiVersion: supplychain/v1alpha1
+kind: ApplicationSpec
+metadata:
+  name: manual-test
+  tier: sandbox
+  upstream: {}
+blocks: {}
+wiring: []
+vault:
+  enabled: true
+custom:
+  runtime-app:
+    description: Normal ArgoCD-managed app
+    namespace: runtime-ns
+    source:
+      chart: charts/runtime-app
+
+  build-job:
+    description: One-time build step — not ArgoCD managed
+    deploy: manual
+    namespace: build-ns
+    source:
+      chart: charts/build-job
+"""
+
+
+class TestManualDeploy:
+    def test_manual_component_absent_from_argocd_apps(self, tmp_path):
+        out = _compose(tmp_path, _MANUAL_DEPLOY_SPEC)
+        apps = _read_yaml(out / 'values-prod.yaml')['clusterGroup']['applications']
+        assert 'build-job' not in apps
+
+    def test_argocd_component_present(self, tmp_path):
+        out = _compose(tmp_path, _MANUAL_DEPLOY_SPEC)
+        apps = _read_yaml(out / 'values-prod.yaml')['clusterGroup']['applications']
+        assert 'runtime-app' in apps
+        assert apps['runtime-app']['namespace'] == 'runtime-ns'
+
+    def test_invalid_deploy_value_raises(self, tmp_path):
+        bad_spec = _MANUAL_DEPLOY_SPEC.replace("deploy: manual", "deploy: auto")
+        spec_file = tmp_path / 'spec.yaml'
+        spec_file.write_text(bad_spec)
+        from quickpat.compose.parser import load_application_spec, AppSpecError
+        with pytest.raises(AppSpecError, match="deploy.*must be"):
+            load_application_spec(str(spec_file))
+
+
+# ── vault: enabled: true without block secrets ───────────────────────────────
+
+_VAULT_ENABLED_SPEC = """\
+apiVersion: supplychain/v1alpha1
+kind: ApplicationSpec
+metadata:
+  name: vault-flag-test
+  tier: sandbox
+  upstream: {}
+blocks:
+  virt:
+    type: openshift-virtualization
+wiring: []
+vault:
+  enabled: true
+custom:
+  my-app:
+    namespace: my-ns
+    source:
+      chart: charts/my-app
+"""
+
+
+class TestVaultEnabled:
+    def test_vault_app_in_values_prod(self, tmp_path):
+        out = _compose(tmp_path, _VAULT_ENABLED_SPEC)
+        apps = _read_yaml(out / 'values-prod.yaml')['clusterGroup']['applications']
+        assert 'vault' in apps
+
+    def test_eso_subscription_present(self, tmp_path):
+        out = _compose(tmp_path, _VAULT_ENABLED_SPEC)
+        subs = _read_yaml(out / 'values-prod.yaml')['clusterGroup']['subscriptions']
+        assert 'openshift-external-secrets' in subs
+
+    def test_secret_template_generated(self, tmp_path):
+        # When vault is enabled (even with no block secrets), a template is produced
+        # if top-level secrets are also present.
+        spec_with_secrets = _VAULT_ENABLED_SPEC + """\
+secrets:
+  - name: my-key
+    vault_path: vault-flag-test/my-key
+    fields:
+      - name: value
+"""
+        out = _compose(tmp_path, spec_with_secrets)
+        assert (out / 'values-secret.yaml.template').exists()
+
+
+# ── VP v2 values-secret.yaml.template ────────────────────────────────────────
+
+_SECRETS_SPEC = """\
+apiVersion: supplychain/v1alpha1
+kind: ApplicationSpec
+metadata:
+  name: secrets-test
+  tier: sandbox
+  upstream: {}
+blocks: {}
+wiring: []
+vault:
+  enabled: true
+custom: {}
+secrets:
+  - name: ssh
+    vault_path: secrets-test/ssh
+    fields:
+      - name: private_key
+      - name: public_key
+
+  - name: anthropic
+    vault_path: secrets-test/anthropic
+    onMissingValue: skip
+    fields:
+      - name: api_key
+
+  - name: gemini
+    vault_path: secrets-test/gemini
+    onMissingValue: skip
+    fields:
+      - name: api_key
+"""
+
+
+class TestVP2SecretTemplate:
+    def test_template_file_exists(self, tmp_path):
+        out = _compose(tmp_path, _SECRETS_SPEC)
+        assert (out / 'values-secret.yaml.template').exists()
+
+    def test_version_2_0(self, tmp_path):
+        out = _compose(tmp_path, _SECRETS_SPEC)
+        tmpl = _read_yaml(out / 'values-secret.yaml.template')
+        assert tmpl['version'] == '2.0'
+
+    def test_backing_store_vault(self, tmp_path):
+        out = _compose(tmp_path, _SECRETS_SPEC)
+        tmpl = _read_yaml(out / 'values-secret.yaml.template')
+        assert tmpl['backingStore'] == 'vault'
+
+    def test_ssh_group_present(self, tmp_path):
+        out = _compose(tmp_path, _SECRETS_SPEC)
+        tmpl = _read_yaml(out / 'values-secret.yaml.template')
+        names = [s['name'] for s in tmpl['secrets']]
+        assert 'ssh' in names
+
+    def test_ssh_has_both_fields(self, tmp_path):
+        out = _compose(tmp_path, _SECRETS_SPEC)
+        tmpl = _read_yaml(out / 'values-secret.yaml.template')
+        ssh = next(s for s in tmpl['secrets'] if s['name'] == 'ssh')
+        field_names = [f['name'] for f in ssh['fields']]
+        assert 'private_key' in field_names
+        assert 'public_key' in field_names
+
+    def test_all_groups_present(self, tmp_path):
+        out = _compose(tmp_path, _SECRETS_SPEC)
+        tmpl = _read_yaml(out / 'values-secret.yaml.template')
+        names = {s['name'] for s in tmpl['secrets']}
+        assert names == {'ssh', 'anthropic', 'gemini'}
+
+    def test_fields_have_null_value(self, tmp_path):
+        out = _compose(tmp_path, _SECRETS_SPEC)
+        tmpl = _read_yaml(out / 'values-secret.yaml.template')
+        for secret in tmpl['secrets']:
+            for f in secret['fields']:
+                assert 'value' in f
+                assert f['value'] is None
+
+    def test_skip_secrets_still_in_template(self, tmp_path):
+        # onMissingValue: skip secrets still appear in the template
+        # (user still needs to know to populate them if they want that provider)
+        out = _compose(tmp_path, _SECRETS_SPEC)
+        tmpl = _read_yaml(out / 'values-secret.yaml.template')
+        names = {s['name'] for s in tmpl['secrets']}
+        assert 'anthropic' in names
+        assert 'gemini' in names
+
+    def test_no_vault_prefixes(self, tmp_path):
+        # VP v2 format uses value: null, not vaultPrefixes
+        out = _compose(tmp_path, _SECRETS_SPEC)
+        tmpl = _read_yaml(out / 'values-secret.yaml.template')
+        for secret in tmpl['secrets']:
+            assert 'vaultPrefixes' not in secret
+
+    def test_no_on_missing_value_in_template(self, tmp_path):
+        # Template fields should only have name + value, not onMissingValue
+        out = _compose(tmp_path, _SECRETS_SPEC)
+        tmpl = _read_yaml(out / 'values-secret.yaml.template')
+        for secret in tmpl['secrets']:
+            for f in secret['fields']:
+                assert 'onMissingValue' not in f
