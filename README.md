@@ -1,6 +1,6 @@
 # QuickPat
 
-Convert [Red Hat AI Quickstarts](https://github.com/rh-ai-quickstart) into [Validated Patterns](https://validatedpatterns.io/) — production-ready, GitOps-driven OpenShift deployments. Two authoring paths:
+Red Hat Field CTO engineering tool. Converts [Red Hat AI Quickstarts](https://github.com/rh-ai-quickstart) into [Validated Patterns](https://validatedpatterns.io/) — production-ready, GitOps-driven OpenShift deployments. Two authoring paths:
 
 - **`quickpat create`** — analyzes an existing Quickstart Helm chart and generates a VP automatically
 - **`quickpat compose`** — compiles a declarative `ApplicationSpec` into either a VP or a Quickstart Helm chart

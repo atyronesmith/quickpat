@@ -2,15 +2,23 @@
 
 ## Project Overview
 
-QuickPat converts Red Hat AI Quickstarts into Validated Patterns — GitOps-driven OpenShift deployments using ArgoCD, HashiCorp Vault, and the VP clustergroup chart.
+QuickPat converts Red Hat AI Quickstarts into Validated Patterns — GitOps-driven OpenShift deployments using ArgoCD, HashiCorp Vault, and the VP clustergroup chart. Two authoring paths: `quickpat create` (analyze an existing QS Helm chart) and `quickpat compose` (compile a declarative `ApplicationSpec` into a VP or QS Helm chart from the same input).
 
 ## Architecture
 
-- **CLI entry point:** `quickpat/cli.py` — 7 subcommands (`list`, `analyze`, `create`, `new`, `batch`, `check-ready`, `validate`)
-- **Pipeline:** `quickpat/pipeline.py` orchestrates analyze → detect → generate → validate
+- **CLI entry point:** `quickpat/cli.py` — subcommands: `list`, `analyze`, `create`, `compose`, `update`, `validate`, `new`, `batch`, `check-ready`
+- **Pipeline:** `quickpat/pipeline.py` — top-level orchestration for both the `create` path (analyze → generate → validate) and the `compose` path (`compose_from_spec`, `compose_qs_from_spec`)
 - **Analyzer:** `quickpat/analyzer.py` — parses Helm charts, detects operators/secrets/GPU/features
-- **Generator:** `quickpat/generator.py` — emits VP directory structure (values-global, values-prod, Makefile, etc.)
-- **Validator:** `quickpat/validator.py` — structural checks + SKILL.md conformance checks + auto-fix loop
+- **Generator:** `quickpat/generator.py` — emits VP directory structure (values-global, values-prod, infra charts, ExternalSecrets, overrides, Makefile, pattern.sh)
+- **Validator:** `quickpat/validator.py` — structural checks + Patternizer conformance checks + auto-fix loop
+- **Compose package:** `quickpat/compose/` — ApplicationSpec authoring path:
+  - `parser.py` — loads and validates `ApplicationSpec` YAML into typed dataclasses
+  - `blocks.py` — block type registry (9 types → operators, DSC config, labels)
+  - `compiler.py` — translates `ApplicationSpec` → `(QuickstartAnalysis, config)` for `PatternGenerator`
+  - `block_templates.py` — inline Kubernetes manifest generators per block type (QS output)
+  - `qs_generator.py` — writes the QS Helm chart directory
+  - `renderer.py` — resolves `{{ blocks.X.output.Y }}` wiring references
+- **Update command:** `quickpat/cli.py:cmd_update` — re-clones the upstream QS repo and re-runs the `create` path against an existing pattern, preserving the `.quickpat/profile.yaml` fingerprints and secret/drift decisions. Detects upstream drift via subchart hash comparison.
 - **LLM providers:** `quickpat/providers/` — Protocol-based classes for OpenAI, Anthropic, Ollama, vLLM, DeepInfra. All optional; deterministic mode works without any LLM.
 - **Config:** `quickpat/config.py` — YAML config with deep-merge defaults. API keys come from environment variables, never config files.
 
