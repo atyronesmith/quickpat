@@ -1,0 +1,98 @@
+apiVersion: supplychain/v1alpha1
+kind: ApplicationSpec
+
+metadata:
+  name: spending-transaction-monitor
+  description: AI-powered fraud detection and spending alert system
+  tier: sandbox
+  devices: [gpu]
+
+blocks:
+
+  platform:
+    type: ai-platform-foundation
+    config:
+      dsc:
+        kserve: Managed
+        dashboard: Managed
+
+  gpu:
+    type: gpu-compute
+    config:
+      mig_strategy: none
+      dcgm: true
+
+  llm:
+    type: model-serving
+    config:
+      model: meta-llama/Llama-3.1-8B-Instruct
+      runtime: vllm
+      gpu: true
+      storage:
+        type: oci
+        uri: oci://quay.io/redhat-ai-services/modelcar-catalog:llama-3.1-8b-instruct
+
+  db:
+    type: vector-store
+    config:
+      database: spending-monitor
+
+  llm-server:
+    type: llama-stack
+    config:
+      port: 8321
+    inputs:
+      llm: llm
+      vector_store: db
+
+  model-store:
+    type: object-storage
+    config:
+      provider: minio
+      bucket: models
+      storage: 20Gi
+
+  auth:
+    type: sso-auth
+
+custom:
+  spending-monitor-api:
+    source:
+      image: quay.io/rh-ai-quickstart/spending-monitor-api:latest
+    replicas: 1
+    ports:
+      - name: http
+        port: 8000
+        route: true
+        tls:
+          termination: edge
+
+  spending-monitor-ui:
+    source:
+      image: quay.io/rh-ai-quickstart/spending-monitor-ui:latest
+    replicas: 1
+    ports:
+      - name: http
+        port: 8080
+        route: true
+        tls:
+          termination: edge
+
+  keycloak:
+    source:
+      image: quay.io/keycloak/keycloak:26.0.7
+    replicas: 1
+    ports:
+      - name: http
+        port: 8080
+        route: true
+        tls:
+          termination: edge
+
+  spending-monitor-db:
+    source:
+      image: quay.io/rh-ai-quickstart/pgvector:pg16
+    replicas: 1
+    ports:
+      - name: postgres
+        port: 5432
