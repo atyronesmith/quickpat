@@ -7,20 +7,24 @@ Completed items move to CHANGES.md at release time.
 
 ## Spec validation (`quickpat validate-spec`)
 
-- [ ] **SV-1** Wiring `from:` / `to:` references validated against `blocks:` keys (error)
-- [ ] **SV-2** Block `inputs:` values reference existing block names (error)
-- [ ] **SV-3** Template expressions `{{ blocks.X.output.Y }}` reference existing blocks (error)
-- [ ] **SV-4** Doc marker balance — unclosed `<!-- vp-only -->` / `<!-- qs-only -->` (error)
-- [ ] **SV-5** Duplicate secret names in top-level `secrets:` (error)
-- [ ] **SV-6** Secrets with no `fields:` entries (warning)
-- [ ] **SV-7** `custom.*.source.chart` path exists on disk when `spec_dir` is known (warning)
-- [ ] **SV-8** Doc `source` files exist on disk when `spec_dir` is known (warning)
-- [ ] **SV-9** `vm-workspace` block without `openshift-virtualization` block (error)
-- [ ] **SV-10** `vault: enabled: true` with no `secrets:` entries (suggestion)
-- [ ] **SV-11** Unknown block type — "did you mean X?" suggestion (warning)
-- [ ] New `quickpat validate-spec <spec.yaml>` CLI subcommand with `--json` and `--strict` flags
-- [ ] Run `validate-spec` automatically on `quickpat compose` — errors abort, warnings print
-- [ ] `ValidationResult` / `Issue` reused from `validator.py` (no new reporting infra)
+- [x] **SV-1** Wiring `from:` / `to:` references validated against `blocks:` keys (error)
+- [x] **SV-2/4** `{{ blocks.X.* }}` template expressions in inputs, config, custom env (error)
+- [x] **SV-3** Wiring `via:` is non-empty (warning)
+- [x] **SV-5** `custom.*.source.chart` path exists on disk when `spec_dir` is known (warning)
+- [x] **SV-6** Secrets with no `fields:` entries (warning)
+- [x] **SV-7** `vault_path` last segment matches secret name by convention (warning)
+- [x] **SV-8** Duplicate secret names in top-level `secrets:` (error)
+- [x] **SV-9** Doc `source` files exist on disk when `spec_dir` is known (warning)
+- [x] **SV-10** Doc marker balance — unclosed / stray `<!-- vp-only -->` / `<!-- qs-only -->` (error)
+- [x] **SV-11** Unknown block type — "did you mean X?" suggestion using fuzzy matching (warning)
+- [x] **SV-12** Block-level secrets conflict with `pattern-secrets` custom chart (warning)
+- [x] **SV-13** `vm-workspace` block without `openshift-virtualization` (error)
+- [x] **SV-14** `keycloak-oidc` + `vm-workspace` present but not wired (warning)
+- [x] **SV-15** `vault: enabled: true` with no `secrets:` declared anywhere (warning)
+- [x] `quickpat validate-spec <spec.yaml>` CLI subcommand with `--json` and `--strict` flags
+- [x] `validate_spec` called automatically on `quickpat compose` — errors abort, warnings print
+- [x] `ValidationResult` / `Issue` reused from `validator.py` (no new reporting infra)
+- [ ] `quickpat lint spec.yaml` — alias for `validate-spec` (more discoverable name)
 
 ## CI/CD templates
 

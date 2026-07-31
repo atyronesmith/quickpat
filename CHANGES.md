@@ -8,6 +8,33 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `quickpat validate-spec spec.yaml` — new CLI subcommand that validates a spec
+  file semantically before composing. 15 checks across 7 categories:
+  - Wiring `from:` / `to:` reference existing blocks (error)
+  - `{{ blocks.X.* }}` template expressions in inputs, config, and custom env
+    reference existing blocks (error)
+  - Wiring `via:` is non-empty (warning)
+  - `custom.*.source.chart` paths exist on disk (warning)
+  - Top-level secrets have at least one field (warning)
+  - `vault_path` last segment matches secret name by convention (warning)
+  - Duplicate secret names in `secrets:` (error)
+  - Doc `source` files exist on disk (warning)
+  - Unclosed or stray `<!-- vp-only -->` / `<!-- qs-only -->` / `<!-- end -->`
+    markers in doc source files (error)
+  - Unknown block type with "did you mean?" suggestion using fuzzy matching (warning)
+  - `vm-workspace` block present without `openshift-virtualization` (error)
+  - `keycloak-oidc` + `vm-workspace` both present but not connected in wiring (warning)
+  - Block-level secrets conflict with `pattern-secrets` custom chart (warning)
+  - `vault: enabled: true` with no secrets declared anywhere (warning)
+  - `--json` flag for machine-readable output; `--strict` to treat warnings as errors
+- `compose_from_spec` now runs `validate_spec` before generation — error-severity
+  issues abort compose; warnings are printed but do not block output
+- `CustomComponent` gains `source_chart` field (parsed from `source.chart`)
+  so the chart-path existence check has access to the declared path
+- 43 tests in `tests/test_spec_validator.py` covering every check and every
+  branch, including all negative/valid-case paths
+
 ---
 
 ## [0.2.0] — 2026-07-31
