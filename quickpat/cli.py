@@ -1015,10 +1015,14 @@ def cmd_validate(args):
 def _print_transform_result(result: TransformResult):
     if result.success:
         output_dir = result.pattern_dir
-        generated_files = list(result.files_created)
+        n_written = len(result.files_created)
+        n_unchanged = len(result.files_unchanged)
         print(f"\nPattern generated: {output_dir}/")
-        print(f"Files: {len(generated_files)}")
-        for filepath in generated_files:
+        if n_unchanged:
+            print(f"Files: {n_written} changed, {n_unchanged} unchanged")
+        else:
+            print(f"Files: {n_written}")
+        for filepath in result.files_created:
             print(f"  {filepath}")
         if result.llm_decisions:
             print("\nLLM decisions:")

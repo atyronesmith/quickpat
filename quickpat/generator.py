@@ -1477,7 +1477,7 @@ def build_report(analysis, config=None):
         lines.append('')
         lines.append('| Operator | Subscription | Channel | Source |')
         lines.append('|----------|-------------|---------|--------|')
-        for op_key in analysis.detected_operators:
+        for op_key in sorted(analysis.detected_operators):
             op = OPERATORS[op_key]
             lines.append(
                 f"| {op['display_name']} | "

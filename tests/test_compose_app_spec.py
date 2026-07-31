@@ -1127,3 +1127,102 @@ class TestSpecDocsPipeline:
         from quickpat.compose.parser import load_application_spec, AppSpecError
         with pytest.raises(AppSpecError, match="deploy.*must be"):
             load_application_spec(str(spec_file))
+
+
+# ── Incremental update (only changed files written) ───────────────────────────
+
+_INCREMENTAL_SPEC_TEMPLATE = """\
+apiVersion: supplychain/v1alpha1
+kind: ApplicationSpec
+metadata:
+  name: incremental-test
+  tier: sandbox
+  upstream: {}
+blocks: {}
+wiring: []
+vault:
+  enabled: true
+custom: {}
+docs:
+  - source: docs/README.md
+    target: README.md
+secrets:
+  - name: mykey
+    vault_path: incremental-test/mykey
+    fields:
+      - name: value
+"""
+
+
+class TestIncrementalUpdate:
+    def _first_run(self, tmp_path):
+        """Perform initial compose and return the output dir."""
+        spec_file = tmp_path / 'spec.yaml'
+        spec_file.write_text(_INCREMENTAL_SPEC_TEMPLATE)
+        docs_dir = tmp_path / 'docs'
+        docs_dir.mkdir()
+        (docs_dir / 'README.md').write_text('# Initial README\nSome content.')
+        out = str(tmp_path / 'vp-out')
+        compose_from_spec(str(spec_file), output_dir=out)
+        return Path(out), spec_file, docs_dir
+
+    def test_first_run_produces_files(self, tmp_path):
+        out, _, _ = self._first_run(tmp_path)
+        assert (out / 'README.md').exists()
+        assert (out / 'values-prod.yaml').exists()
+
+    def test_second_run_unchanged_reports_unchanged(self, tmp_path):
+        out, spec_file, _ = self._first_run(tmp_path)
+        result2 = compose_from_spec(str(spec_file), output_dir=str(out))
+        # Nothing changed — all files should be unchanged
+        assert result2.files_unchanged
+        assert len(result2.files_created) == 0
+
+    def test_doc_change_only_touches_readme(self, tmp_path):
+        out, spec_file, docs_dir = self._first_run(tmp_path)
+        # Only change the README source
+        (docs_dir / 'README.md').write_text('# Updated README\nNew content.')
+        result2 = compose_from_spec(str(spec_file), output_dir=str(out))
+        assert 'README.md' in result2.files_created
+        # values-prod.yaml, values-global.yaml etc. must be unchanged
+        assert 'values-prod.yaml' in result2.files_unchanged
+        assert 'values-global.yaml' in result2.files_unchanged
+
+    def test_doc_change_does_not_touch_values_prod(self, tmp_path):
+        out, spec_file, docs_dir = self._first_run(tmp_path)
+        vprod_before = (out / 'values-prod.yaml').read_bytes()
+        (docs_dir / 'README.md').write_text('# Different README.')
+        compose_from_spec(str(spec_file), output_dir=str(out))
+        vprod_after = (out / 'values-prod.yaml').read_bytes()
+        assert vprod_before == vprod_after
+
+    def test_files_unchanged_populated_on_second_run(self, tmp_path):
+        out, spec_file, _ = self._first_run(tmp_path)
+        result2 = compose_from_spec(str(spec_file), output_dir=str(out))
+        assert len(result2.files_unchanged) > 5  # many files should be unchanged
+
+    def test_qs_incremental_unchanged(self, tmp_path):
+        from quickpat.pipeline import compose_qs_from_spec
+        spec_file = tmp_path / 'spec.yaml'
+        spec_file.write_text(_INCREMENTAL_SPEC_TEMPLATE)
+        (tmp_path / 'docs').mkdir()
+        (tmp_path / 'docs' / 'README.md').write_text('# QS README')
+        qs_out = str(tmp_path / 'qs-out')
+        compose_qs_from_spec(str(spec_file), output_dir=qs_out)
+        result2 = compose_qs_from_spec(str(spec_file), output_dir=qs_out)
+        assert len(result2.files_created) == 0
+        assert result2.files_unchanged
+
+    def test_qs_doc_change_only_touches_readme(self, tmp_path):
+        from quickpat.pipeline import compose_qs_from_spec
+        spec_file = tmp_path / 'spec.yaml'
+        spec_file.write_text(_INCREMENTAL_SPEC_TEMPLATE)
+        docs_dir = tmp_path / 'docs'
+        docs_dir.mkdir()
+        (docs_dir / 'README.md').write_text('# QS README v1')
+        qs_out = str(tmp_path / 'qs-out')
+        compose_qs_from_spec(str(spec_file), output_dir=qs_out)
+        (docs_dir / 'README.md').write_text('# QS README v2')
+        result2 = compose_qs_from_spec(str(spec_file), output_dir=qs_out)
+        assert 'README.md' in result2.files_created
+        assert len(result2.files_created) == 1

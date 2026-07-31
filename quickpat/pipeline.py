@@ -32,10 +32,38 @@ class TransformResult:
     pattern_dir: str = ""
     analysis: Optional[QuickstartAnalysis] = None
     config: Optional[dict] = None
-    files_created: list = field(default_factory=list)
+    files_created: list = field(default_factory=list)    # files written (new or changed)
+    files_unchanged: list = field(default_factory=list)  # files skipped (content identical)
     warnings: list = field(default_factory=list)
     llm_decisions: list = field(default_factory=list)
     validation: Optional[ValidationResult] = None
+
+
+def _sync_dir(src: Path, dst: Path) -> tuple:
+    """Copy src → dst, skipping files whose byte content is unchanged.
+
+    Returns (files_written, files_unchanged) as lists of str relative paths.
+    files_written contains both new files and files whose content changed.
+    files_unchanged contains files that already existed with identical content.
+    """
+    import shutil as _shutil
+    files_written = []
+    files_unchanged = []
+
+    for src_file in sorted(src.rglob('*')):
+        if not src_file.is_file():
+            continue
+        rel = src_file.relative_to(src)
+        dst_file = dst / rel
+        dst_file.parent.mkdir(parents=True, exist_ok=True)
+        src_bytes = src_file.read_bytes()
+        if dst_file.exists() and dst_file.read_bytes() == src_bytes:
+            files_unchanged.append(str(rel))
+        else:
+            _shutil.copy2(src_file, dst_file)
+            files_written.append(str(rel))
+
+    return files_written, files_unchanged
 
 
 # ── Response schemas for structured output ─────────────────────────
@@ -337,23 +365,35 @@ def compose_from_spec(
     result.analysis = analysis
     result.config = config
 
-    skill_generate(analysis, config)
+    # Generate to a temp directory, then sync only changed files to output_dir.
+    # This prevents unnecessary git churn when only a subset of files changed
+    # (e.g. docs/ update should not touch values-prod.yaml).
+    import tempfile
+    with tempfile.TemporaryDirectory() as _tmp:
+        tmp_out = Path(_tmp) / 'out'
+        tmp_config = {**config, 'output_dir': str(tmp_out)}
 
-    if auto_fix:
-        val_result = validate_and_fix(
-            output_dir, config, max_iterations=max_fix_iterations,
-        )
-    else:
-        val_result = validate(output_dir, config)
+        skill_generate(analysis, tmp_config)
+
+        if auto_fix:
+            val_result = validate_and_fix(
+                str(tmp_out), tmp_config, max_iterations=max_fix_iterations,
+            )
+        else:
+            val_result = validate(str(tmp_out), tmp_config)
+
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        files_written, files_unchanged = _sync_dir(tmp_out, Path(output_dir))
 
     result.validation = val_result
     result.success = True
+    result.files_created = files_written
+    result.files_unchanged = files_unchanged
 
     for issue in val_result.issues:
         if not issue.fix_applied:
             result.warnings.append(f"[{issue.severity}] {issue.file}: {issue.message}")
 
-    result.files_created = _list_created_files(output_dir, config)
     return result
 
 
@@ -394,11 +434,18 @@ def compose_qs_from_spec(
     result.pattern_dir = output_dir
     result.config = config
 
-    gen = QSGenerator(spec, config, Path(output_dir))
-    gen.generate()
+    import tempfile
+    with tempfile.TemporaryDirectory() as _tmp:
+        tmp_out = Path(_tmp) / 'out'
+        gen = QSGenerator(spec, config, tmp_out)
+        gen.generate()
+
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        files_written, files_unchanged = _sync_dir(tmp_out, Path(output_dir))
 
     result.success = True
-    result.files_created = _list_created_files(output_dir, config)
+    result.files_created = files_written
+    result.files_unchanged = files_unchanged
     return result
 
 
