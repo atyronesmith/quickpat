@@ -435,8 +435,15 @@ def cmd_compose(args):
     if result.success:
         if fmt == 'qs':
             out = result.pattern_dir
-            n = len(result.files_created) if result.files_created else '?'
-            print(f"QS chart generated: {out}/\nFiles: {n}")
+            n_written = len(result.files_created)
+            n_unchanged = len(result.files_unchanged)
+            print(f"\nQS chart generated: {out}/")
+            if n_unchanged:
+                print(f"Files: {n_written} changed, {n_unchanged} unchanged")
+            else:
+                print(f"Files: {n_written}")
+            for filepath in result.files_created:
+                print(f"  {filepath}")
             blocks = result.config.get('_block_configs', {}) if result.config else {}
             if blocks:
                 print(f"\nBlocks compiled: {', '.join(blocks)}")
