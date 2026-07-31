@@ -184,6 +184,19 @@ def main():
     )
     _add_llm_args(validate_p)
 
+    validate_spec_p = subparsers.add_parser(
+        'validate-spec', help='Validate a spec.yaml file before composing'
+    )
+    validate_spec_p.add_argument('spec', help='Path to spec.yaml')
+    validate_spec_p.add_argument(
+        '--json', action='store_true', dest='json_output',
+        help='Output results as JSON',
+    )
+    validate_spec_p.add_argument(
+        '--strict', action='store_true',
+        help='Treat warnings as errors (exit 1 if any issues found)',
+    )
+
     args = parser.parse_args()
 
     if args.command == 'compose':
@@ -206,6 +219,8 @@ def main():
         cmd_transform(args)
     elif args.command == 'validate':
         cmd_validate(args)
+    elif args.command == 'validate-spec':
+        cmd_validate_spec(args)
 
 
 def _add_transform_args(parser):
@@ -987,6 +1002,56 @@ def print_results(config):
     print(f"  5. Edit ~/values-secret-{config['pattern_name']}.yaml with your secrets")
     print(f"  6. oc login <cluster>")
     print(f"  7. ./pattern.sh make install")
+
+
+def cmd_validate_spec(args):
+    """Validate a spec.yaml file before composing.
+
+    Exit codes:
+        0 — spec is valid (no errors; warnings may be present)
+        1 — one or more error-severity issues found
+        2 — spec file could not be parsed
+    """
+    import dataclasses
+    import json
+    import sys
+    from pathlib import Path as _Path
+    from .compose.parser import load_application_spec, AppSpecError
+    from .compose.spec_validator import validate_spec
+
+    try:
+        spec = load_application_spec(args.spec)
+    except AppSpecError as e:
+        if args.json_output:
+            print(json.dumps({'valid': False, 'parse_error': str(e), 'issues': []}))
+        else:
+            print(f"Parse error: {e}", file=sys.stderr)
+        sys.exit(2)
+
+    spec_dir = str(_Path(args.spec).resolve().parent)
+    result = validate_spec(spec, spec_dir=spec_dir)
+
+    if args.json_output:
+        print(json.dumps(dataclasses.asdict(result), indent=2))
+    else:
+        for issue in result.issues:
+            print(f"[{issue.severity}] {issue.file}: {issue.message}")
+        n_errors = sum(1 for i in result.issues if i.severity == 'error')
+        n_warnings = sum(1 for i in result.issues if i.severity == 'warning')
+        if not result.issues:
+            print("spec valid — no issues found")
+        else:
+            parts = []
+            if n_errors:
+                parts.append(f"{n_errors} error(s)")
+            if n_warnings:
+                parts.append(f"{n_warnings} warning(s)")
+            status = "INVALID" if not result.valid else "valid with warnings"
+            print(f"\nspec {status}: {', '.join(parts)}")
+
+    if args.strict and result.issues:
+        sys.exit(1)
+    sys.exit(0 if result.valid else 1)
 
 
 def cmd_validate(args):

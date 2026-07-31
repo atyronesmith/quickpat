@@ -76,6 +76,7 @@ class CustomComponent:
     name: str
     image: str
     namespace: str = ''
+    source_chart: str = ''        # source.chart path (local), if declared
     extra_value_files: list = field(default_factory=list)
     # 'argocd' (default) — creates an ArgoCD app in values-prod.yaml
     # 'manual'           — chart is in the repo but NOT managed by ArgoCD
@@ -230,6 +231,7 @@ def _parse_custom(raw: dict) -> dict:
 
         source = comp_raw.get('source', {})
         image = source.get('image', '') if isinstance(source, dict) else ''
+        source_chart = source.get('chart', '') if isinstance(source, dict) else ''
 
         deploy = comp_raw.get('deploy', 'argocd')
         if deploy not in ('argocd', 'manual'):
@@ -241,6 +243,7 @@ def _parse_custom(raw: dict) -> dict:
             name=comp_name,
             image=image,
             namespace=comp_raw.get('namespace') or '',
+            source_chart=source_chart,
             extra_value_files=comp_raw.get('extraValueFiles') or [],
             deploy=deploy,
             replicas=comp_raw.get('replicas') or 1,
