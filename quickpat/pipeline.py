@@ -434,6 +434,50 @@ def compose_from_spec(
     return result
 
 
+def compose_upgrade_from_spec(
+    spec_path: str,
+    platform: str,
+    from_version: str,
+    to_version: str,
+    output_dir: str = None,
+) -> TransformResult:
+    """Generate an upgrade runbook for upgrading a spec repo between versions.
+
+    Output goes to <output_dir>/<platform>-v<from>-to-v<to>/RUNBOOK.md.
+    Default output_dir: upgrade/ inside the spec repo directory.
+    """
+    result = TransformResult(success=False)
+
+    try:
+        spec = load_application_spec(spec_path)
+    except AppSpecError as e:
+        result.warnings.append(str(e))
+        return result
+
+    spec_dir = str(Path(spec_path).resolve().parent)
+    if not output_dir:
+        output_dir = str(Path(spec_dir) / 'upgrade')
+
+    from .compose.upgrade_generator import generate_upgrade_runbook
+    try:
+        runbook_path = generate_upgrade_runbook(
+            spec=spec,
+            platform=platform,
+            from_version=from_version,
+            to_version=to_version,
+            output_dir=Path(output_dir),
+            spec_dir=spec_dir,
+        )
+    except ValueError as e:
+        result.warnings.append(str(e))
+        return result
+
+    result.success = True
+    result.pattern_dir = str(runbook_path.parent)
+    result.files_created = [str(runbook_path.name)]
+    return result
+
+
 def compose_qs_from_spec(
     spec_path: str,
     output_dir: str = None,

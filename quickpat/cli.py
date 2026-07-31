@@ -450,35 +450,86 @@ def cmd_new(args):
 
 
 def _parse_target_arg(target_str):
-    """Parse --target PLATFORM=VERSION into a TargetSpec, or None."""
+    """Parse --target PLATFORM=VERSION or PLATFORM=FROM..TO.
+
+    Returns:
+        TargetSpec for single-version targets (rhoai=3.5)
+        dict {'upgrade': True, 'platform': ..., 'from': ..., 'to': ...} for ranges
+        None if target_str is empty
+    """
+    import sys
     if not target_str:
         return None
     if '=' not in target_str:
-        import sys
-        print(f"Error: --target must be in PLATFORM=VERSION format (e.g. rhoai=3.5)", file=sys.stderr)
+        print(f"Error: --target must be PLATFORM=VERSION or PLATFORM=FROM..TO "
+              f"(e.g. rhoai=3.5 or rhoai=3.4..3.5)", file=sys.stderr)
         sys.exit(1)
-    if '..' in target_str:
-        import sys
-        print(f"Error: upgrade paths (--target {target_str}) are not yet supported in compose. "
-              f"Use quickpat upgrade (coming in a future release).", file=sys.stderr)
-        sys.exit(1)
-    platform, version = target_str.split('=', 1)
-    from .compose.parser import TargetSpec
+
+    platform, rest = target_str.split('=', 1)
+    platform = platform.strip()
     from .compose.version_registry import resolve_version
+
+    if '..' in rest:
+        # Upgrade path: rhoai=3.4..3.5
+        parts = rest.split('..', 1)
+        from_version, to_version = parts[0].strip(), parts[1].strip()
+        for ver in (from_version, to_version):
+            try:
+                resolve_version(platform, ver)
+            except ValueError as e:
+                print(f"Error: {e}", file=sys.stderr)
+                sys.exit(1)
+        return {
+            'upgrade': True,
+            'platform': platform,
+            'from_version': from_version,
+            'to_version': to_version,
+        }
+
+    # Single version: rhoai=3.5
+    version = rest.strip()
     try:
-        resolve_version(platform.strip(), version.strip())
+        resolve_version(platform, version)
     except ValueError as e:
-        import sys
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
-    return TargetSpec(platform=platform.strip(), version=version.strip())
+    from .compose.parser import TargetSpec
+    return TargetSpec(platform=platform, version=version)
 
 
 def cmd_compose(args):
-    """Compile an ApplicationSpec into a VP or QS."""
+    """Compile an ApplicationSpec into a VP, QS, or upgrade runbook."""
+    import sys
     fmt = getattr(args, 'format', 'vp')
     output_dir = args.output or None
     cli_target = _parse_target_arg(getattr(args, 'target', None))
+
+    # Upgrade path: --target rhoai=3.4..3.5
+    if isinstance(cli_target, dict) and cli_target.get('upgrade'):
+        from .pipeline import compose_upgrade_from_spec
+        platform = cli_target['platform']
+        fv = cli_target['from_version']
+        tv = cli_target['to_version']
+        print(f"=== QuickPat Upgrade Runbook: {platform} {fv} → {tv} ===\n")
+        result = compose_upgrade_from_spec(
+            spec_path=args.spec,
+            platform=platform,
+            from_version=fv,
+            to_version=tv,
+            output_dir=output_dir,
+        )
+        if result.success:
+            runbook = result.files_created[0] if result.files_created else 'RUNBOOK.md'
+            print(f"Runbook written: {result.pattern_dir}/{runbook}")
+            print(f"\nNext steps:")
+            print(f"  1. Review the runbook: {result.pattern_dir}/{runbook}")
+            print(f"  2. Complete all BLOCKING pre-upgrade items")
+            print(f"  3. quickpat compose spec.yaml --target {platform}={tv}")
+        else:
+            for w in result.warnings:
+                print(f"Error: {w}", file=sys.stderr)
+            sys.exit(1)
+        return
 
     if fmt == 'qs':
         print("=== QuickPat Compose: ApplicationSpec -> Quickstart Helm Chart ===\n")
