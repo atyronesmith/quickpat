@@ -102,6 +102,12 @@ OPERATORS = {
         'source': 'redhat-operators',
         'indicators': ['certificate', 'issuer', 'clusterissuer', 'cert-manager'],
         'co_dependencies': [],
+        # cert-manager-operator namespace needs an OperatorGroup;
+        # targetNamespaces: [] means cluster-scoped watch.
+        'namespace_config': {
+            'operatorGroup': True,
+            'targetNamespaces': [],
+        },
     },
     'jobset': {
         'subscription_name': 'openshift-jobset-operator',
@@ -115,6 +121,10 @@ OPERATORS = {
     'rhbk': {
         'subscription_name': 'rhbk-operator',
         'display_name': 'Red Hat Build of Keycloak',
+        # NOTE: 'openshell-agents' matches the secure-agent-workspace (SAW) pattern
+        # convention where all components share one namespace. Other patterns that use
+        # the keycloak-oidc block type may want a different namespace. This should be
+        # made configurable via block config in a future version (TODO).
         'namespace': 'openshell-agents',
         'channel': 'stable-v26',
         'source': 'redhat-operators',

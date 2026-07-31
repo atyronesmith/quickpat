@@ -72,6 +72,11 @@ BLOCK_TYPES = {
         'needs_oai_labels': False,
     },
     'sso-auth': {
+        # Semantic marker only — installs NO operators.
+        # Use this block to declare that your pattern requires SSO/OIDC,
+        # but supply the actual identity provider (Keycloak, Dex, etc.)
+        # as a custom component. If you need the RHBK operator installed,
+        # use the keycloak-oidc block type instead.
         'operators': [],
         'needs_oai_labels': False,
     },

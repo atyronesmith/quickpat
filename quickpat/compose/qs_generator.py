@@ -261,7 +261,10 @@ stringData:
         current = _yaml.safe_load(current_text) or {}
 
         to_merge = {}
-        for comp_name in self.spec.custom:
+        for comp_name, comp in self.spec.custom.items():
+            # Skip manual components — their templates weren't written into the QS chart
+            if getattr(comp, 'deploy', 'argocd') == 'manual':
+                continue
             if comp_name not in existing:
                 continue
             chart_values_path = Path(spec_dir) / 'charts' / comp_name / 'values.yaml'
@@ -269,9 +272,18 @@ stringData:
                 continue
             chart_values = _yaml.safe_load(chart_values_path.read_text(encoding='utf-8')) or {}
             for key, val in chart_values.items():
-                # Add only keys absent from both the current values and already-merged ones
+                # Add only keys absent from both the current values and already-merged ones.
+                # When two charts both define the same key, the first one wins — warn so
+                # the author knows to resolve the conflict explicitly.
                 if key not in current and key not in to_merge:
                     to_merge[key] = val
+                elif key in to_merge and to_merge[key] != val:
+                    import warnings as _w
+                    _w.warn(
+                        f"QS values conflict: '{key}' defined in multiple custom charts. "
+                        f"Using first value; override in chart/{key} if needed.",
+                        stacklevel=2,
+                    )
 
         if not to_merge:
             return

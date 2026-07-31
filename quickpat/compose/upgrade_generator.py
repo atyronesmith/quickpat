@@ -29,7 +29,14 @@ def generate_upgrade_runbook(
     """Generate an upgrade runbook and write it to output_dir.
 
     Returns the path of the written RUNBOOK.md.
+    Raises ValueError for unknown platform/version or same-version input.
+    Raises OSError if output_dir is a file rather than a directory.
     """
+    if from_version == to_version:
+        raise ValueError(
+            f"from_version and to_version are both {from_version!r} — "
+            f"specify two different versions (e.g. {platform}=3.4..3.5)"
+        )
     from_data = resolve_version(platform, from_version)
     to_data = resolve_version(platform, to_version)
     breaking = get_breaking_changes(platform, from_version, to_version)

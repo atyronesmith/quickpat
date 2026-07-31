@@ -468,7 +468,7 @@ def compose_upgrade_from_spec(
             output_dir=Path(output_dir),
             spec_dir=spec_dir,
         )
-    except ValueError as e:
+    except (ValueError, OSError) as e:
         result.warnings.append(str(e))
         return result
 

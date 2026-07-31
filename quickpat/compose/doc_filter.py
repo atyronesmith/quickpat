@@ -85,7 +85,14 @@ def process_docs(doc_entries, spec_dir: str, output_dir: Path, deploy_mode: str)
             warnings.warn(f"docs source not found: {source_path}", stacklevel=2)
             continue
 
-        content = source_path.read_text(encoding='utf-8')
+        try:
+            content = source_path.read_text(encoding='utf-8')
+        except (OSError, UnicodeDecodeError) as exc:
+            warnings.warn(
+                f"docs source could not be read as UTF-8 text ({exc}): {source_path}",
+                stacklevel=2,
+            )
+            continue
         filtered = filter_doc(content, deploy_mode)
 
         target_path = output_dir / entry.target

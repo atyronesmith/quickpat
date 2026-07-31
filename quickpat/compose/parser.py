@@ -176,9 +176,9 @@ def load_application_spec(path: str) -> ApplicationSpec:
     if not isinstance(devices, list):
         raise AppSpecError("metadata.devices must be a list (e.g. [cpu, gpu])")
 
-    blocks = _parse_blocks(raw.get('blocks', {}))
-    custom = _parse_custom(raw.get('custom', {}))
-    wiring = _parse_wiring(raw.get('wiring', []))
+    blocks = _parse_blocks(raw.get('blocks') or {})
+    custom = _parse_custom(raw.get('custom') or {})
+    wiring = _parse_wiring(raw.get('wiring') or [])
 
     vault_raw = raw.get('vault', {}) or {}
     vault_enabled = bool(vault_raw.get('enabled', False))
@@ -234,7 +234,7 @@ def _parse_blocks(raw: dict) -> dict:
             name=block_name,
             block_type=block_raw['type'],
             profile=block_raw.get('profile', ''),
-            config=block_raw.get('config', {}),
+            config=block_raw.get('config') or {},
             secrets=secrets,
             inputs=inputs,
         )
@@ -255,7 +255,7 @@ def _parse_custom(raw: dict) -> dict:
         image = source.get('image', '') if isinstance(source, dict) else ''
         source_chart = source.get('chart', '') if isinstance(source, dict) else ''
 
-        deploy = comp_raw.get('deploy', 'argocd')
+        deploy = comp_raw.get('deploy') or 'argocd'
         if deploy not in ('argocd', 'manual'):
             raise AppSpecError(
                 f"custom.{comp_name}.deploy must be 'argocd' or 'manual', got {deploy!r}"
@@ -285,12 +285,13 @@ def _parse_target(raw) -> object:
         return None
     if not isinstance(raw, dict):
         raise AppSpecError("'target' must be a mapping with 'platform' and 'version'")
-    platform = raw.get('platform', '')
-    version = str(raw.get('version', ''))
+    platform = raw.get('platform') or ''
+    version = raw.get('version')
     if not platform:
         raise AppSpecError("target.platform is required (e.g. 'rhoai')")
-    if not version:
+    if version is None or str(version).strip() == '':
         raise AppSpecError("target.version is required (e.g. '3.5')")
+    version = str(version).strip()
     # Validate the platform/version exists in the registry
     from .version_registry import resolve_version
     try:
@@ -313,10 +314,10 @@ def _parse_docs(raw: list) -> list:
     for i, entry in enumerate(raw):
         if not isinstance(entry, dict):
             raise AppSpecError(f"docs[{i}] must be a mapping")
-        if not entry.get('source'):
-            raise AppSpecError(f"docs[{i}]: 'source' is required and must be non-empty")
-        if not entry.get('target'):
-            raise AppSpecError(f"docs[{i}]: 'target' is required and must be non-empty")
+        if not isinstance(entry.get('source'), str) or not entry['source']:
+            raise AppSpecError(f"docs[{i}]: 'source' must be a non-empty string path")
+        if not isinstance(entry.get('target'), str) or not entry['target']:
+            raise AppSpecError(f"docs[{i}]: 'target' must be a non-empty string path")
         deploy = entry.get('deploy', 'both')
         if deploy not in _VALID_DOC_DEPLOY:
             raise AppSpecError(

@@ -33,7 +33,10 @@ def compile_spec(
     version_overrides = {}
     if active_target:
         from .version_registry import resolve_version
-        version_overrides = resolve_version(active_target.platform, active_target.version)
+        try:
+            version_overrides = resolve_version(active_target.platform, active_target.version)
+        except ValueError as e:
+            raise ComposeError(str(e))
 
     # 1. Collect operators and flags from all blocks
     raw_ops = set()

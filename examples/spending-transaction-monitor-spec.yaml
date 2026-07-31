@@ -106,9 +106,9 @@ blocks:
       storage: 20Gi               # 20 GiB for embedding model weights
 
   # ── sso-auth ──────────────────────────────────────────────────────────────
-  # SSO authentication stub. The actual Keycloak instance is deployed as a
-  # custom component below — this block declares the SSO dependency so the
-  # compiler knows to include auth infrastructure in the operator set.
+  # Semantic marker only — installs NO operators (sso-auth has operators: []).
+  # The actual Keycloak instance is deployed as a custom component below.
+  # Use keycloak-oidc block type instead if you need the RHBK operator installed.
   auth:
     type: sso-auth
 

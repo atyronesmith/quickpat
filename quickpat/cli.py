@@ -471,6 +471,14 @@ def _parse_target_arg(target_str):
 
     if '..' in rest:
         # Upgrade path: rhoai=3.4..3.5
+        # Guard against triple-dot (3.4...3.5) which would produce '.3.5'
+        if '...' in rest:
+            print(
+                f"Error: use exactly two dots for an upgrade path "
+                f"(e.g. {platform}=3.4..3.5), got three or more dots.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         parts = rest.split('..', 1)
         from_version, to_version = parts[0].strip(), parts[1].strip()
         for ver in (from_version, to_version):
@@ -1135,14 +1143,16 @@ def cmd_init_ci(args):
 
     output_dir = _Path(args.output_dir).resolve() if args.output_dir else spec_path.parent
 
-    # Read the pattern name from the spec
+    # Read the pattern name from the spec — fail hard on parse errors so the
+    # generated workflow doesn't silently get the wrong pattern name substituted.
+    from .compose.parser import load_application_spec, AppSpecError
     try:
-        from .compose.parser import load_application_spec, AppSpecError
         spec = load_application_spec(str(spec_path))
         pattern_name = spec.name
-    except Exception as e:
-        print(f"Warning: could not parse spec.yaml ({e}) — using directory name as pattern name")
-        pattern_name = output_dir.name
+    except AppSpecError as e:
+        print(f"Error: could not parse {spec_path}: {e}", file=sys.stderr)
+        print("Fix spec.yaml first, then re-run quickpat init-ci.", file=sys.stderr)
+        sys.exit(1)
 
     # Locate the template
     template_path = _Path(__file__).parent / 'templates' / 'ci' / 'compose.yml'
@@ -1170,8 +1180,9 @@ def cmd_init_ci(args):
         print("Use --force to overwrite.")
         sys.exit(1)
 
+    is_new = not dest.exists()
     dest.write_text(workflow)
-    action = "Updated" if dest.exists() else "Created"
+    action = "Created" if is_new else "Updated"
     print(f"{action}: {dest}")
     print(f"Pattern name: {pattern_name}")
     print(f"PR comment marker: <!-- {comment_marker} -->")

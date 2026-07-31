@@ -176,7 +176,11 @@ UPGRADE_BREAKING_CHANGES = {
             ),
         },
     ],
-    ('rhoai', '3.3', '3.4'): [
+    # 3.0→3.4: covers any upgrade from the 3.0 baseline to 3.4.
+    # PLATFORM_VERSIONS has no 3.1/3.2/3.3 entries; users on those versions
+    # should consult Red Hat docs directly. The mlflow change applies to
+    # any 3.x → 3.4 upgrade.
+    ('rhoai', '3.0', '3.4'): [
         {
             'description': (
                 'mlflowoperator DSC component added in 3.4. '

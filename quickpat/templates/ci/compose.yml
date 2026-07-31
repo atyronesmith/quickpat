@@ -36,7 +36,7 @@ jobs:
 
       - name: Install kubeconform
         run: |
-          curl -sL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz \
+          curl -sL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
             | tar xz -C /usr/local/bin
 
       # ── Spec validation ──────────────────────────────────────────────────────
@@ -44,6 +44,7 @@ jobs:
       # --strict treats warnings as errors; remove if you want warnings to pass.
 
       - name: Validate spec
+        id: validate_spec_step
         run: quickpat validate-spec spec.yaml --strict
 
       # ── VP compose + validation ──────────────────────────────────────────────
@@ -185,7 +186,6 @@ jobs:
         # Failures are warnings only (|| true) — network flakiness should not block PRs.
         if: hashFiles('docs/**/*.md') != ''
         run: |
-          pip install --quiet requests
           python3 - <<'EOF'
           import re, sys, urllib.request, urllib.error
           from pathlib import Path

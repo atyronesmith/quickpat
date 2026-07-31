@@ -178,7 +178,9 @@ class PatternGenerator:
 
         # Operator namespaces
         for op_key in operators:
-            op = OPERATORS[op_key]
+            op = OPERATORS.get(op_key)
+            if op is None:
+                continue
             ns = op['namespace']
             if ns in seen or ns == 'openshift-operators':
                 continue
