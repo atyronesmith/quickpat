@@ -776,3 +776,269 @@ class TestComposeIntegration:
         result = compose_from_spec(str(spec_file), output_dir=str(tmp_path / 'out'))
         assert result.success
         assert any('[spec:warning]' in w for w in result.warnings)
+
+
+# ── Gap coverage: cases not covered by original tests ─────────────────────────
+
+class TestTemplatRefsInConfig:
+    """SV-4: Bad block ref in block.config (not just inputs/env)."""
+
+    def test_bad_block_ref_in_block_config_is_error(self, tmp_path):
+        spec_yaml = """\
+            apiVersion: supplychain/v1alpha1
+            kind: ApplicationSpec
+            metadata:
+              name: test
+              tier: sandbox
+              upstream: {}
+            blocks:
+              platform:
+                type: ai-platform-foundation
+              guardrails:
+                type: guardrails-orchestrator
+                config:
+                  llm:
+                    endpoint: "{{ blocks.nonexistent_llm.output.predictor_host }}"
+            wiring: []
+            custom: {}
+            """
+        _, result, _ = _validate(spec_yaml, tmp_path)
+        assert not result.valid
+        assert any('nonexistent_llm' in e for e in _errors(result))
+
+    def test_valid_block_ref_in_config_no_error(self, tmp_path):
+        spec_yaml = """\
+            apiVersion: supplychain/v1alpha1
+            kind: ApplicationSpec
+            metadata:
+              name: test
+              tier: sandbox
+              upstream: {}
+            blocks:
+              llm:
+                type: model-serving
+              guardrails:
+                type: guardrails-orchestrator
+                config:
+                  llm:
+                    endpoint: "{{ blocks.llm.output.predictor_host }}"
+            wiring: []
+            custom: {}
+            """
+        _, result, _ = _validate(spec_yaml, tmp_path)
+        assert not _errors(result)
+
+
+class TestBlockCombosNegative:
+    """SV-14 should NOT fire when only one of keycloak-oidc/vm-workspace is present."""
+
+    def test_keycloak_without_vm_workspace_no_sv14(self, tmp_path):
+        spec_yaml = """\
+            apiVersion: supplychain/v1alpha1
+            kind: ApplicationSpec
+            metadata:
+              name: test
+              tier: sandbox
+              upstream: {}
+            blocks:
+              identity:
+                type: keycloak-oidc
+            wiring: []
+            custom: {}
+            """
+        _, result, _ = _validate(spec_yaml, tmp_path)
+        # SV-14 requires BOTH blocks; with only keycloak-oidc, no SV-14 warning
+        assert not any('wiring' in w and 'oidc' in w.lower() for w in _warnings(result))
+
+    def test_vm_workspace_with_virt_but_no_keycloak_no_sv14(self, tmp_path):
+        spec_yaml = """\
+            apiVersion: supplychain/v1alpha1
+            kind: ApplicationSpec
+            metadata:
+              name: test
+              tier: sandbox
+              upstream: {}
+            blocks:
+              virt:
+                type: openshift-virtualization
+              sandbox:
+                type: vm-workspace
+            wiring: []
+            custom: {}
+            """
+        _, result, _ = _validate(spec_yaml, tmp_path)
+        # No keycloak-oidc block → no SV-14 warning
+        assert not any('keycloak' in w.lower() and 'wiring' in w.lower() for w in _warnings(result))
+
+
+class TestBlockSecretsNoConflict:
+    """SV-12 should NOT fire when there are no block-level secrets."""
+
+    def test_pattern_secrets_without_block_secrets_no_warning(self, tmp_path):
+        spec_yaml = """\
+            apiVersion: supplychain/v1alpha1
+            kind: ApplicationSpec
+            metadata:
+              name: test
+              tier: sandbox
+              upstream: {}
+            blocks:
+              platform:
+                type: ai-platform-foundation
+            wiring: []
+            custom:
+              pattern-secrets:
+                description: ExternalSecrets chart
+            """
+        _, result, _ = _validate(spec_yaml, tmp_path)
+        # No block-level secrets → no conflict warning
+        assert not any('pattern-secrets' in w and 'duplicate' in w.lower() for w in _warnings(result))
+
+
+class TestVaultWithBlockSecrets:
+    """SV-15 should NOT fire when vault is enabled and block-level secrets exist."""
+
+    def test_vault_enabled_with_block_secrets_no_sv15(self, tmp_path):
+        spec_yaml = """\
+            apiVersion: supplychain/v1alpha1
+            kind: ApplicationSpec
+            metadata:
+              name: test
+              tier: sandbox
+              upstream: {}
+            blocks:
+              llm:
+                type: model-serving
+                secrets:
+                  api-key:
+                    vault_path: test/api-key
+            wiring: []
+            custom: {}
+            vault:
+              enabled: true
+            """
+        _, result, _ = _validate(spec_yaml, tmp_path)
+        # Block-level secret counts — SV-15 should not fire
+        assert not any('no secrets' in w.lower() or
+                       ('vault' in w.lower() and 'secret' in w.lower() and 'enabled' in w.lower())
+                       for w in _warnings(result))
+
+
+class TestVaultPathDefault:
+    """SV-7 should NOT fire when vault_path is not specified (defaults to name)."""
+
+    def test_secret_without_vault_path_no_sv7_warning(self, tmp_path):
+        # vault_path defaults to the name in the parser — should match and not warn
+        spec_yaml = """\
+            apiVersion: supplychain/v1alpha1
+            kind: ApplicationSpec
+            metadata:
+              name: test
+              tier: sandbox
+              upstream: {}
+            blocks: {}
+            wiring: []
+            custom: {}
+            vault:
+              enabled: true
+            secrets:
+              - name: my-secret
+                fields:
+                  - name: value
+            """
+        _, result, _ = _validate(spec_yaml, tmp_path)
+        # vault_path defaults to 'my-secret' (= name) — no convention warning
+        assert not any('vault_path' in w for w in _warnings(result))
+
+
+class TestChartPathsImageOnly:
+    """SV-5 should NOT fire for image-only components (no source.chart)."""
+
+    def test_image_only_component_no_sv5_warning(self, tmp_path):
+        spec_yaml = """\
+            apiVersion: supplychain/v1alpha1
+            kind: ApplicationSpec
+            metadata:
+              name: test
+              tier: sandbox
+              upstream: {}
+            blocks: {}
+            wiring: []
+            custom:
+              my-app:
+                source:
+                  image: quay.io/example/myapp:latest
+            """
+        _, result, _ = _validate(spec_yaml, tmp_path)
+        # image-only component has no source.chart — SV-5 skips it
+        assert not any('stubbed' in w or 'chart' in w.lower() for w in _warnings(result))
+
+    def test_component_with_no_source_key_no_sv5_warning(self, tmp_path):
+        spec_yaml = """\
+            apiVersion: supplychain/v1alpha1
+            kind: ApplicationSpec
+            metadata:
+              name: test
+              tier: sandbox
+              upstream: {}
+            blocks: {}
+            wiring: []
+            custom:
+              my-app:
+                description: App with no source at all
+            """
+        _, result, _ = _validate(spec_yaml, tmp_path)
+        assert not any('stubbed' in w or 'does not exist' in w for w in _warnings(result))
+
+
+class TestDocMarkersQsOnly:
+    """SV-10: qs-only unclosed markers also produce errors (not just vp-only)."""
+
+    def test_unclosed_qs_only_marker_is_error(self, tmp_path):
+        (tmp_path / 'docs').mkdir()
+        (tmp_path / 'docs' / 'guide.md').write_text(
+            "# Title\n\n<!-- qs-only -->\nQS content\n\nNo end marker\n"
+        )
+        spec_yaml = """\
+            apiVersion: supplychain/v1alpha1
+            kind: ApplicationSpec
+            metadata:
+              name: test
+              tier: sandbox
+              upstream: {}
+            blocks: {}
+            wiring: []
+            custom: {}
+            docs:
+              - source: docs/guide.md
+                target: README.md
+            """
+        _, result, _ = _validate(spec_yaml, tmp_path)
+        assert not result.valid
+        assert any('unclosed' in e.lower() or 'end' in e.lower() for e in _errors(result))
+
+    def test_multiple_balanced_sections_no_error(self, tmp_path):
+        (tmp_path / 'docs').mkdir()
+        (tmp_path / 'docs' / 'guide.md').write_text(
+            "# Title\n\n"
+            "<!-- vp-only -->\nVP section 1\n<!-- end -->\n\n"
+            "Shared content\n\n"
+            "<!-- qs-only -->\nQS section 1\n<!-- end -->\n\n"
+            "<!-- vp-only -->\nVP section 2\n<!-- end -->\n"
+        )
+        spec_yaml = """\
+            apiVersion: supplychain/v1alpha1
+            kind: ApplicationSpec
+            metadata:
+              name: test
+              tier: sandbox
+              upstream: {}
+            blocks: {}
+            wiring: []
+            custom: {}
+            docs:
+              - source: docs/guide.md
+                target: README.md
+            """
+        _, result, _ = _validate(spec_yaml, tmp_path)
+        assert not _errors(result)
