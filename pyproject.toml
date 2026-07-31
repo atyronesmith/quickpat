@@ -1,6 +1,6 @@
 [project]
 name = "quickpat"
-version = "0.1.0"
+version = "0.2.0"
 description = "Convert AI Quickstarts into Validated Patterns"
 requires-python = ">=3.10"
 dependencies = [
