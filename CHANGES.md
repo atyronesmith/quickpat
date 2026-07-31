@@ -64,6 +64,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   (CLI `--target` overrides spec `target:` when both are set)
 - Version registry (`quickpat/compose/version_registry.py`) with data for
   RHOAI 2.25, 3.0, 3.4, and 3.5 — channels, DSC defaults, co-deps, OCP minimums
+- `quickpat compose spec.yaml --target rhoai=3.4..3.5` — upgrade runbook
+  generator. Diffs two version entries and writes
+  `upgrade/<platform>-vFROM-to-vTO/RUNBOOK.md` containing:
+  - Pre-upgrade checklist with blocking items prominently flagged
+    (e.g. ModelMesh migration requirement for 2.x → 3.0)
+  - Subscription changes table (channel bumps, new/removed operators,
+    `installPlanApproval: Manual` note with exact `oc patch` commands)
+  - DSC component changes (new components, state changes)
+  - Upgrade procedure with exact `quickpat compose` commands
+  - Post-upgrade verification commands
 - Breaking-changes registry (`UPGRADE_BREAKING_CHANGES`) documents the
   2.25→3.0 blocking migration requirement and 3.3→3.4 mlflowoperator change
   (used by upgrade runbook generation — Item 2b, coming next)

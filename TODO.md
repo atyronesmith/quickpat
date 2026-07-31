@@ -50,11 +50,12 @@ Completed items move to CHANGES.md at release time.
 - [x] `installPlanApproval: Manual` emitted when target version is pinned
 - [x] Cert Manager and Jobset Operator added as co-dependencies for RHOAI 3.x targets
 - [x] `UPGRADE_BREAKING_CHANGES` registry (2.25→3.0 blocking; 3.3→3.4 warning)
-- [ ] `--target old..new` upgrade path: generates `upgrade/vX.Y-to-vA.B/RUNBOOK.md`
+- [x] `--target old..new` upgrade path: generates `upgrade/<platform>-vFROM-to-vTO/RUNBOOK.md`
   - Pre-upgrade checklist (blocking changes must be resolved first)
-  - Changed subscriptions (channel bumps, new operators)
+  - Changed subscriptions (channel bumps, new operators, installPlanApproval note)
   - DSC component diff
-  - Post-upgrade verification steps
+  - Upgrade procedure (exact quickpat compose commands)
+  - Post-upgrade verification commands
 - [ ] `startingCSV` emitted alongside `installPlanApproval: Manual` for exact version pinning
 - [ ] Warn when spec has `ai-platform-foundation` block but no `target:` (channel defaults to `fast`)
 
