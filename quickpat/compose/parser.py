@@ -142,7 +142,7 @@ def load_application_spec(path: str) -> ApplicationSpec:
     if tier not in VALID_TIERS:
         raise AppSpecError(f"Invalid tier {tier!r}, must be one of: {sorted(VALID_TIERS)}")
 
-    upstream_raw = meta.get('upstream', {})
+    upstream_raw = meta.get('upstream', {}) or {}
     upstream = UpstreamRef(
         repo=upstream_raw.get('repo', ''),
         path=upstream_raw.get('path', 'chart'),
@@ -240,21 +240,22 @@ def _parse_custom(raw: dict) -> dict:
         custom[comp_name] = CustomComponent(
             name=comp_name,
             image=image,
-            namespace=comp_raw.get('namespace', ''),
-            extra_value_files=comp_raw.get('extraValueFiles', []),
+            namespace=comp_raw.get('namespace') or '',
+            extra_value_files=comp_raw.get('extraValueFiles') or [],
             deploy=deploy,
-            replicas=comp_raw.get('replicas', 1),
-            ports=comp_raw.get('ports', []),
-            env=comp_raw.get('env', {}),
-            resources=comp_raw.get('resources', {}),
-            probes=comp_raw.get('probes', {}),
-            monitor=comp_raw.get('monitor', {}),
+            replicas=comp_raw.get('replicas') or 1,
+            ports=comp_raw.get('ports') or [],
+            env=comp_raw.get('env') or {},
+            resources=comp_raw.get('resources') or {},
+            probes=comp_raw.get('probes') or {},
+            monitor=comp_raw.get('monitor') or {},
         )
 
     return custom
 
 
 _VALID_DOC_DEPLOY = {'both', 'vp', 'qs'}
+_VALID_ON_MISSING = {'prompt', 'skip', 'generate'}
 
 
 def _parse_docs(raw: list) -> list:
@@ -266,10 +267,10 @@ def _parse_docs(raw: list) -> list:
     for i, entry in enumerate(raw):
         if not isinstance(entry, dict):
             raise AppSpecError(f"docs[{i}] must be a mapping")
-        if 'source' not in entry:
-            raise AppSpecError(f"docs[{i}]: missing 'source'")
-        if 'target' not in entry:
-            raise AppSpecError(f"docs[{i}]: missing 'target'")
+        if not entry.get('source'):
+            raise AppSpecError(f"docs[{i}]: 'source' is required and must be non-empty")
+        if not entry.get('target'):
+            raise AppSpecError(f"docs[{i}]: 'target' is required and must be non-empty")
         deploy = entry.get('deploy', 'both')
         if deploy not in _VALID_DOC_DEPLOY:
             raise AppSpecError(
@@ -329,10 +330,16 @@ def _parse_top_level_secrets(raw: list) -> list:
 
         name = entry['name']
         vault_path = entry.get('vault_path', name)
+        on_missing = entry.get('onMissingValue', 'prompt')
+        if on_missing not in _VALID_ON_MISSING:
+            raise AppSpecError(
+                f"secrets[{i}].onMissingValue must be one of "
+                f"{sorted(_VALID_ON_MISSING)}, got {on_missing!r}"
+            )
         secrets.append(TopLevelSecret(
             name=name,
             vault_path=vault_path,
-            on_missing=entry.get('onMissingValue', 'prompt'),
+            on_missing=on_missing,
             fields=parsed_fields,
         ))
 

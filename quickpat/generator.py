@@ -132,6 +132,11 @@ class PatternGenerator:
         if len(self.analysis.charts) > 1:
             result = []
             for ci in self.analysis.charts:
+                # Skip remote charts when there's no upstream URL — same logic
+                # as the single-chart path to prevent orphan namespace entries.
+                if (ci.strategy or self.config.get('chart_strategy', 'remote')) == 'remote':
+                    if not self.config.get('git_repo_url', ''):
+                        continue
                 ns = ns_overrides.get(ci.name, ci.group or ci.name)
                 result.append((ci.name, ns, ci))
             return result
@@ -258,14 +263,21 @@ class PatternGenerator:
 
         # Infrastructure config charts (operator CRs)
         # Skip device-specific operators — they appear in values-gpu.yaml etc.
+        # Also skip when a custom component with the same chart_name exists —
+        # the hand-written chart takes precedence and both would collide.
         operators = self.config.get('operators', [])
         device_ops = self._device_operators()
+        custom_chart_names = {
+            name for name in self.config.get('custom_components', {})
+        }
         for op_key in operators:
             if op_key in device_ops:
                 continue
             if op_key in INFRA_CHARTS:
                 ic = INFRA_CHARTS[op_key]
                 chart_name = ic['chart_name']
+                if chart_name in custom_chart_names:
+                    continue  # hand-written chart handles this; no auto-generated app
                 applications[chart_name] = {
                     'name': chart_name,
                     'namespace': ic['namespace'],
@@ -404,9 +416,13 @@ class PatternGenerator:
 
         secrets_entries = []
         for secret in top_level_secrets:
-            fields = [{'name': f.name, 'value': None} for f in secret.fields]
+            # value: '' is the VP v2 placeholder — None serialises to YAML null
+            # which is not a valid VP secret loader form.
+            fields = [{'name': f.name, 'value': ''} for f in secret.fields]
             if not fields:
-                fields = [{'name': 'value', 'value': None}]
+                # Declared secret with no fields — add a single 'value' field
+                # as a placeholder so the template is always well-formed.
+                fields = [{'name': 'value', 'value': ''}]
             secrets_entries.append({'name': secret.name, 'fields': fields})
 
         doc = {

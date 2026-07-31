@@ -26,6 +26,7 @@ Example:
 """
 
 import re
+import warnings
 from pathlib import Path
 
 _VP_ONLY  = re.compile(r'^\s*<!--\s*vp-only\s*-->\s*$', re.IGNORECASE)
@@ -81,7 +82,6 @@ def process_docs(doc_entries, spec_dir: str, output_dir: Path, deploy_mode: str)
         if not source_path.exists():
             # Warn but don't fail — missing source is a spec authoring error,
             # not a compiler error; the rest of generation should still succeed.
-            import warnings
             warnings.warn(f"docs source not found: {source_path}", stacklevel=2)
             continue
 

@@ -864,13 +864,15 @@ class TestVP2SecretTemplate:
         names = {s['name'] for s in tmpl['secrets']}
         assert names == {'ssh', 'anthropic', 'gemini'}
 
-    def test_fields_have_null_value(self, tmp_path):
+    def test_fields_have_empty_string_value(self, tmp_path):
+        # VP v2 uses value: '' as the placeholder — not null.
+        # null is not a valid VP secret loader form.
         out = _compose(tmp_path, _SECRETS_SPEC)
         tmpl = _read_yaml(out / 'values-secret.yaml.template')
         for secret in tmpl['secrets']:
             for f in secret['fields']:
                 assert 'value' in f
-                assert f['value'] is None
+                assert f['value'] == ''
 
     def test_skip_secrets_still_in_template(self, tmp_path):
         # onMissingValue: skip secrets still appear in the template

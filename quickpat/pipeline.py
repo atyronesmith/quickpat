@@ -40,20 +40,28 @@ class TransformResult:
 
 
 def _sync_dir(src: Path, dst: Path) -> tuple:
-    """Copy src → dst, skipping files whose byte content is unchanged.
+    """Sync src → dst: copy changed files and delete files no longer in src.
 
     Returns (files_written, files_unchanged) as lists of str relative paths.
-    files_written contains both new files and files whose content changed.
+    files_written contains new files and files whose content changed.
     files_unchanged contains files that already existed with identical content.
+
+    Files present in dst but absent from src are deleted so that removed
+    blocks, charts, and components don't persist across compose runs and
+    cause ArgoCD to deploy applications that no longer exist in the spec.
     """
     import shutil as _shutil
+
     files_written = []
     files_unchanged = []
 
+    # Build the set of relative paths that src produces
+    src_rels = set()
     for src_file in sorted(src.rglob('*')):
         if not src_file.is_file():
             continue
         rel = src_file.relative_to(src)
+        src_rels.add(rel)
         dst_file = dst / rel
         dst_file.parent.mkdir(parents=True, exist_ok=True)
         src_bytes = src_file.read_bytes()
@@ -62,6 +70,23 @@ def _sync_dir(src: Path, dst: Path) -> tuple:
         else:
             _shutil.copy2(src_file, dst_file)
             files_written.append(str(rel))
+
+    # Delete files in dst that are no longer produced by src
+    if dst.exists():
+        for dst_file in sorted(dst.rglob('*')):
+            if not dst_file.is_file():
+                continue
+            rel = dst_file.relative_to(dst)
+            if rel not in src_rels:
+                dst_file.unlink()
+                # Remove empty parent directories left behind
+                for parent in dst_file.parents:
+                    if parent == dst:
+                        break
+                    try:
+                        parent.rmdir()  # only succeeds if empty
+                    except OSError:
+                        break
 
     return files_written, files_unchanged
 
