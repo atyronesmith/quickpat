@@ -9,6 +9,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `quickpat init-ci spec.yaml [--output-dir DIR] [--force]` — installs the
+  hardened CI workflow into any spec repo. Reads the pattern name from spec.yaml,
+  substitutes it into the template, and writes `.github/workflows/compose.yml`.
+- Hardened CI workflow template (`quickpat/templates/ci/compose.yml`):
+  - `quickpat validate-spec --strict` before compose — spec errors abort the run
+  - VP drift detection — fail if `vp-out/` doesn't match what compose produces
+    (`pattern-metadata.yaml` excluded; it contains a daily generation date)
+  - QS drift detection — same for `qs-out/`
+  - Helm lint + kubeconform on `qs-out/chart/` (previously not validated)
+  - Image tag check — warns on `:latest` tags in generated charts (non-blocking)
+  - Doc link checker — validates URLs in `docs/**/*.md` (non-blocking)
+  - PR comment table now covers both VP and QS lint/kubeconform results
+- QS generator now merges each copied custom chart's `values.yaml` into the QS
+  chart's top-level `values.yaml`. Fixes helm lint nil-pointer errors when
+  templates reference `.Values.secretStoreRef` / `.Values.vaultPrefix` /
+  `.Values.refreshInterval` that were only defined in the source chart.
 - `quickpat validate-spec spec.yaml` — new CLI subcommand that validates a spec
   file semantically before composing. 15 checks across 7 categories:
   - Wiring `from:` / `to:` reference existing blocks (error)
@@ -30,10 +46,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
   - `--json` flag for machine-readable output; `--strict` to treat warnings as errors
 - `compose_from_spec` now runs `validate_spec` before generation — error-severity
   issues abort compose; warnings are printed but do not block output
+- QS generator skips `deploy: manual` components entirely — they are build-time
+  only and should not appear in the QS Helm chart.
 - `CustomComponent` gains `source_chart` field (parsed from `source.chart`)
   so the chart-path existence check has access to the declared path
 - 43 tests in `tests/test_spec_validator.py` covering every check and every
   branch, including all negative/valid-case paths
+
+### Fixed
+- `vp-out/.gitignore` pattern `values-secret*` was too broad — excluded
+  `values-secret.yaml.template` (safe to commit) in addition to
+  `values-secret.yaml` (real secrets, must stay ignored). Changed to
+  `values-secret.yaml` + `!values-secret.yaml.template`. Fixes CI drift
+  check failures where fresh compose generated the template but git ignored it.
+- QS chart stub directories used `.gitkeep` which helm lint rejects as an
+  invalid template extension. Changed to `NOTES.txt`.
+- `deploy: manual` components were included in QS chart template stubs —
+  they are now skipped entirely in `_write_custom_components`.
 
 ---
 

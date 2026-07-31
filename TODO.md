@@ -28,13 +28,14 @@ Completed items move to CHANGES.md at release time.
 
 ## CI/CD templates
 
-- [ ] `quickpat/templates/ci/compose.yml` — hardened GitHub Actions workflow template
-- [ ] `quickpat init-ci` command — copies the template into a spec repo
-- [ ] Drift detection step: fail PR if `vp-out/` or `qs-out/` are stale after spec change
-- [ ] QS lint and kubeconform steps (currently only VP is validated in CI)
-- [ ] Doc link checker (`lychee`) on `docs/*.md`
-- [ ] Image tag check — warn on `:latest` tags in generated charts
+- [x] `quickpat/templates/ci/compose.yml` — hardened GitHub Actions workflow template
+- [x] `quickpat init-ci` command — installs the template into a spec repo
+- [x] Drift detection: fail PR if `vp-out/` or `qs-out/` are stale after spec change
+- [x] QS lint and kubeconform steps (was missing entirely)
+- [x] Doc link checker on `docs/*.md` (pure-Python, no extra binary needed)
+- [x] Image tag check — warns on `:latest` tags in generated charts
 - [ ] Security scan (Checkov / trivy) on generated manifests
+- [ ] `quickpat upgrade-ci` — re-run `init-ci --force` and show a diff of what changed
 
 ## Target versioning (`--target platform=version`)
 
