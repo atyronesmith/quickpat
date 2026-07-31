@@ -53,6 +53,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - 43 tests in `tests/test_spec_validator.py` covering every check and every
   branch, including all negative/valid-case paths
 
+- `quickpat compose spec.yaml --target rhoai=3.5` — new `--target PLATFORM=VERSION`
+  flag pins all platform-specific output to a specific release:
+  - Operator subscription channel (e.g. `fast` → `stable-3.5`)
+  - `installPlanApproval: Manual` for pinned versions
+  - Version-required co-dependencies injected automatically
+    (RHOAI 3.x adds `cert-manager` and `jobset` subscriptions)
+  - Validated at parse time — unknown platforms/versions fail with helpful errors
+- `target:` field in `spec.yaml` for repo-level version pinning
+  (CLI `--target` overrides spec `target:` when both are set)
+- Version registry (`quickpat/compose/version_registry.py`) with data for
+  RHOAI 2.25, 3.0, 3.4, and 3.5 — channels, DSC defaults, co-deps, OCP minimums
+- Breaking-changes registry (`UPGRADE_BREAKING_CHANGES`) documents the
+  2.25→3.0 blocking migration requirement and 3.3→3.4 mlflowoperator change
+  (used by upgrade runbook generation — Item 2b, coming next)
+- `cert-manager` and `jobset` added to the operator registry
+
 ### Fixed
 - `vp-out/.gitignore` pattern `values-secret*` was too broad — excluded
   `values-secret.yaml.template` (safe to commit) in addition to

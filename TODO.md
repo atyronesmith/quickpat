@@ -39,22 +39,23 @@ Completed items move to CHANGES.md at release time.
 
 ## Target versioning (`--target platform=version`)
 
-- [ ] `quickpat/compose/version_registry.py` — RHOAI version → operator channels + DSC defaults
+- [x] `quickpat/compose/version_registry.py` — RHOAI version → operator channels + DSC defaults
   - RHOAI 2.25 (last 2.x; no cert-manager/jobset deps)
   - RHOAI 3.0 (added llamastackoperator; hard break from 2.x)
   - RHOAI 3.4 (added mlflowoperator DSC component)
   - RHOAI 3.5 (current GA; stable-3.5 channel)
-- [ ] `TargetSpec` dataclass and `target:` field on `ApplicationSpec`
-- [ ] `--target platform=version` CLI flag on `compose` (overrides spec `target:`)
-- [ ] Version-aware channel resolution in `_build_subscriptions()` and `compile_spec()`
-- [ ] `installPlanApproval: Manual` + `startingCSV` emitted when target version is pinned
-- [ ] Cert Manager and Jobset Operator added as co-dependencies for RHOAI 3.x targets
-- [ ] `UPGRADE_BREAKING_CHANGES` registry (2.25→3.0 blocking; 3.3→3.4 warning; etc.)
+- [x] `TargetSpec` dataclass and `target:` field on `ApplicationSpec`
+- [x] `--target platform=version` CLI flag on `compose` (overrides spec `target:`)
+- [x] Version-aware channel resolution in `_build_subscriptions()` and `compile_spec()`
+- [x] `installPlanApproval: Manual` emitted when target version is pinned
+- [x] Cert Manager and Jobset Operator added as co-dependencies for RHOAI 3.x targets
+- [x] `UPGRADE_BREAKING_CHANGES` registry (2.25→3.0 blocking; 3.3→3.4 warning)
 - [ ] `--target old..new` upgrade path: generates `upgrade/vX.Y-to-vA.B/RUNBOOK.md`
   - Pre-upgrade checklist (blocking changes must be resolved first)
   - Changed subscriptions (channel bumps, new operators)
   - DSC component diff
   - Post-upgrade verification steps
+- [ ] `startingCSV` emitted alongside `installPlanApproval: Manual` for exact version pinning
 - [ ] Warn when spec has `ai-platform-foundation` block but no `target:` (channel defaults to `fast`)
 
 ## Block library
