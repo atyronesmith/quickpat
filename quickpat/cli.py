@@ -166,6 +166,25 @@ def main():
         'path', help='Path, GitHub URL, or registry name (e.g. RAG)'
     )
 
+    # init-ci subcommand
+    init_ci_p = subparsers.add_parser(
+        'init-ci',
+        help='Install the quickpat CI workflow into a spec repo',
+    )
+    init_ci_p.add_argument(
+        'spec', nargs='?', default='spec.yaml',
+        help='Path to spec.yaml (default: spec.yaml in current directory)',
+    )
+    init_ci_p.add_argument(
+        '--output-dir', default=None,
+        help='Directory to write .github/workflows/compose.yml into '
+             '(default: directory containing spec.yaml)',
+    )
+    init_ci_p.add_argument(
+        '--force', action='store_true',
+        help='Overwrite an existing compose.yml without prompting',
+    )
+
     # validate subcommand
     validate_p = subparsers.add_parser(
         'validate', help='Validate a generated pattern'
@@ -221,6 +240,8 @@ def main():
         cmd_validate(args)
     elif args.command == 'validate-spec':
         cmd_validate_spec(args)
+    elif args.command == 'init-ci':
+        cmd_init_ci(args)
 
 
 def _add_transform_args(parser):
@@ -1002,6 +1023,70 @@ def print_results(config):
     print(f"  5. Edit ~/values-secret-{config['pattern_name']}.yaml with your secrets")
     print(f"  6. oc login <cluster>")
     print(f"  7. ./pattern.sh make install")
+
+
+def cmd_init_ci(args):
+    """Install the quickpat CI workflow into a spec repo.
+
+    Reads the pattern name from spec.yaml, writes a hardened
+    .github/workflows/compose.yml with spec validation, drift detection,
+    VP + QS lint, kubeconform, image-tag check, and doc link check.
+    """
+    import sys
+    from pathlib import Path as _Path
+
+    spec_path = _Path(args.spec).resolve()
+    if not spec_path.exists():
+        print(f"Error: spec file not found: {spec_path}", file=sys.stderr)
+        sys.exit(1)
+
+    output_dir = _Path(args.output_dir).resolve() if args.output_dir else spec_path.parent
+
+    # Read the pattern name from the spec
+    try:
+        from .compose.parser import load_application_spec, AppSpecError
+        spec = load_application_spec(str(spec_path))
+        pattern_name = spec.name
+    except Exception as e:
+        print(f"Warning: could not parse spec.yaml ({e}) — using directory name as pattern name")
+        pattern_name = output_dir.name
+
+    # Locate the template
+    template_path = _Path(__file__).parent / 'templates' / 'ci' / 'compose.yml'
+    if not template_path.exists():
+        print(f"Error: CI template not found at {template_path}", file=sys.stderr)
+        sys.exit(1)
+
+    template = template_path.read_text()
+
+    # Substitute pattern-specific values
+    comment_marker = f"{pattern_name}-compose-summary"
+    workflow = (
+        template
+        .replace('__PATTERN_NAME__', pattern_name)
+        .replace('__COMMENT_MARKER__', comment_marker)
+    )
+
+    # Write the workflow
+    workflows_dir = output_dir / '.github' / 'workflows'
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+    dest = workflows_dir / 'compose.yml'
+
+    if dest.exists() and not args.force:
+        print(f"File already exists: {dest}")
+        print("Use --force to overwrite.")
+        sys.exit(1)
+
+    dest.write_text(workflow)
+    action = "Updated" if dest.exists() else "Created"
+    print(f"{action}: {dest}")
+    print(f"Pattern name: {pattern_name}")
+    print(f"PR comment marker: <!-- {comment_marker} -->")
+    print()
+    print("Next steps:")
+    print("  git add .github/workflows/compose.yml")
+    print("  git commit -m 'Add quickpat CI workflow'")
+    print("  git push")
 
 
 def cmd_validate_spec(args):
