@@ -32,6 +32,25 @@ class SecretField:
 
 
 @dataclass
+class TargetSpec:
+    """Platform version target declared in spec.yaml or passed via --target.
+
+    Controls operator channels, installPlanApproval, DSC component defaults,
+    and required co-dependencies for a specific platform release.
+
+    Example spec.yaml:
+        target:
+          platform: rhoai
+          version: "3.5"
+
+    CLI override:
+        quickpat compose spec.yaml --target rhoai=3.5
+    """
+    platform: str   # e.g. 'rhoai'
+    version: str    # e.g. '3.5'
+
+
+@dataclass
 class DocEntry:
     """A documentation file to be processed and written into the generated output.
 
@@ -110,6 +129,7 @@ class ApplicationSpec:
     vault_enabled: bool = False                   # vault: {enabled: true} in spec
     top_level_secrets: list = field(default_factory=list)  # list of TopLevelSecret
     docs: list = field(default_factory=list)      # list of DocEntry
+    target: object = None                         # TargetSpec | None
 
 
 VALID_TIERS = {'sandbox', 'tested', 'maintained'}
@@ -165,6 +185,7 @@ def load_application_spec(path: str) -> ApplicationSpec:
 
     top_level_secrets = _parse_top_level_secrets(raw.get('secrets', []) or [])
     docs = _parse_docs(raw.get('docs', []) or [])
+    target = _parse_target(raw.get('target'))
 
     return ApplicationSpec(
         name=meta['name'],
@@ -178,6 +199,7 @@ def load_application_spec(path: str) -> ApplicationSpec:
         vault_enabled=vault_enabled,
         top_level_secrets=top_level_secrets,
         docs=docs,
+        target=target,
     )
 
 
@@ -255,6 +277,27 @@ def _parse_custom(raw: dict) -> dict:
         )
 
     return custom
+
+
+def _parse_target(raw) -> object:
+    """Parse target: {platform: rhoai, version: "3.5"} or return None."""
+    if not raw:
+        return None
+    if not isinstance(raw, dict):
+        raise AppSpecError("'target' must be a mapping with 'platform' and 'version'")
+    platform = raw.get('platform', '')
+    version = str(raw.get('version', ''))
+    if not platform:
+        raise AppSpecError("target.platform is required (e.g. 'rhoai')")
+    if not version:
+        raise AppSpecError("target.version is required (e.g. '3.5')")
+    # Validate the platform/version exists in the registry
+    from .version_registry import resolve_version
+    try:
+        resolve_version(platform, version)
+    except ValueError as e:
+        raise AppSpecError(str(e))
+    return TargetSpec(platform=platform, version=version)
 
 
 _VALID_DOC_DEPLOY = {'both', 'vp', 'qs'}

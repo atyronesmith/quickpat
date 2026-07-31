@@ -214,15 +214,27 @@ class PatternGenerator:
 
     def _build_subscriptions(self, operators):
         subscriptions = {}
+        version_op_overrides = self.config.get('version_overrides', {}).get('operators', {})
+
         for op_key in operators:
-            op = OPERATORS[op_key]
+            op = OPERATORS.get(op_key)
+            if op is None:
+                continue  # unknown operator key — skip rather than crash
             sub_key = op.get('subscription_key', op_key)
             sub = {
                 'name': op['subscription_name'],
                 'namespace': op['namespace'],
             }
-            if op.get('channel'):
-                sub['channel'] = op['channel']
+
+            # Apply version-specific overrides for this operator if a target is set.
+            # Version overrides take precedence over OPERATORS defaults.
+            ver_override = version_op_overrides.get(op_key, {})
+            channel = ver_override.get('channel') or op.get('channel')
+            if channel:
+                sub['channel'] = channel
+            if ver_override.get('installPlanApproval'):
+                sub['installPlanApproval'] = ver_override['installPlanApproval']
+
             if op.get('source') and op['source'] != 'redhat-operators':
                 sub['source'] = op['source']
             subscriptions[sub_key] = sub

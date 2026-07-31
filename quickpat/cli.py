@@ -119,6 +119,16 @@ def main():
         help='Output format: vp (Validated Pattern, default) or qs (Quickstart Helm chart)',
     )
     compose_p.add_argument(
+        '--target',
+        metavar='PLATFORM=VERSION',
+        help=(
+            'Pin output to a specific platform version, e.g. --target rhoai=3.5. '
+            'Overrides the target: field in spec.yaml. '
+            'Adjusts operator channels, installPlanApproval, DSC defaults, '
+            'and adds version-required co-dependencies.'
+        ),
+    )
+    compose_p.add_argument(
         '--no-fix', action='store_true',
         help='Skip auto-fix validation pass (VP only)',
     )
@@ -439,33 +449,65 @@ def cmd_new(args):
         sys.exit(1)
 
 
+def _parse_target_arg(target_str):
+    """Parse --target PLATFORM=VERSION into a TargetSpec, or None."""
+    if not target_str:
+        return None
+    if '=' not in target_str:
+        import sys
+        print(f"Error: --target must be in PLATFORM=VERSION format (e.g. rhoai=3.5)", file=sys.stderr)
+        sys.exit(1)
+    if '..' in target_str:
+        import sys
+        print(f"Error: upgrade paths (--target {target_str}) are not yet supported in compose. "
+              f"Use quickpat upgrade (coming in a future release).", file=sys.stderr)
+        sys.exit(1)
+    platform, version = target_str.split('=', 1)
+    from .compose.parser import TargetSpec
+    from .compose.version_registry import resolve_version
+    try:
+        resolve_version(platform.strip(), version.strip())
+    except ValueError as e:
+        import sys
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    return TargetSpec(platform=platform.strip(), version=version.strip())
+
+
 def cmd_compose(args):
     """Compile an ApplicationSpec into a VP or QS."""
     fmt = getattr(args, 'format', 'vp')
     output_dir = args.output or None
+    cli_target = _parse_target_arg(getattr(args, 'target', None))
 
     if fmt == 'qs':
         print("=== QuickPat Compose: ApplicationSpec -> Quickstart Helm Chart ===\n")
         if not output_dir:
             resolved = str(Path(args.spec).resolve().parent / 'qs-out')
             print(f"Output: {resolved} (application repo, default)\n")
+        if cli_target:
+            print(f"Target: {cli_target.platform}={cli_target.version}\n")
         result = compose_qs_from_spec(
             spec_path=args.spec,
             output_dir=output_dir,
             pattern_name=args.name,
             create_service_account=args.create_service_account,
+            cli_target=cli_target,
         )
     else:
         print("=== QuickPat Compose: ApplicationSpec -> Validated Pattern ===\n")
         if not output_dir:
             resolved = str(Path(args.spec).resolve().parent / 'vp-out')
             print(f"Output: {resolved} (application repo, default)\n")
+        if cli_target:
+            print(f"Target: {cli_target.platform}={cli_target.version}\n")
         result = compose_from_spec(
             spec_path=args.spec,
             output_dir=output_dir,
             pattern_name=args.name,
             auto_fix=not args.no_fix,
             create_service_account=args.create_service_account,
+            cli_target=cli_target,
         )
 
     if result.success:
