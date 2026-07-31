@@ -52,6 +52,7 @@ class QSGenerator:
         self._write_notes_txt(prereqs)
         self._write_block_templates()
         self._write_custom_components()
+        self._merge_custom_chart_values()
         self._write_create_secrets_sh(secret_decls)
         self._write_readme(prereqs)
         self._write_spec_docs()
@@ -215,7 +216,11 @@ stringData:
         existing = self.config.get('existing_custom_charts', set())
         spec_dir = self.config.get('spec_dir')
 
-        for comp_name in self.spec.custom:
+        for comp_name, comp in self.spec.custom.items():
+            # deploy: manual components are build-time only — not in the QS chart
+            if getattr(comp, 'deploy', 'argocd') == 'manual':
+                continue
+
             dst = self.templates_dir / comp_name
             if comp_name in existing and spec_dir:
                 # Copy real chart templates directly into chart/templates/<comp>/
@@ -227,8 +232,53 @@ stringData:
                 else:
                     dst.mkdir(exist_ok=True)
             else:
+                # Stub: create an empty NOTES.txt so helm lint accepts the directory
                 dst.mkdir(exist_ok=True)
-                (dst / '.gitkeep').touch()
+                (dst / 'NOTES.txt').write_text(
+                    f'# {comp_name} — chart not yet implemented\n'
+                )
+
+    def _merge_custom_chart_values(self):
+        """Merge values.yaml from each copied custom chart into the QS chart values.
+
+        When templates from a chart (e.g. pattern-secrets) reference
+        .Values.secretStoreRef or .Values.vaultPrefix, those defaults must
+        exist in the QS chart's top-level values.yaml or helm lint/template
+        will fail with nil-pointer errors.
+
+        Only keys not already present in the generated values.yaml are added,
+        so explicitly configured values always take precedence.
+        """
+        import yaml as _yaml
+
+        spec_dir = self.config.get('spec_dir')
+        existing = self.config.get('existing_custom_charts', set())
+        if not spec_dir:
+            return
+
+        values_path = self.chart_dir / 'values.yaml'
+        current_text = values_path.read_text(encoding='utf-8')
+        current = _yaml.safe_load(current_text) or {}
+
+        to_merge = {}
+        for comp_name in self.spec.custom:
+            if comp_name not in existing:
+                continue
+            chart_values_path = Path(spec_dir) / 'charts' / comp_name / 'values.yaml'
+            if not chart_values_path.exists():
+                continue
+            chart_values = _yaml.safe_load(chart_values_path.read_text(encoding='utf-8')) or {}
+            for key, val in chart_values.items():
+                # Add only keys absent from both the current values and already-merged ones
+                if key not in current and key not in to_merge:
+                    to_merge[key] = val
+
+        if not to_merge:
+            return
+
+        with open(values_path, 'a', encoding='utf-8') as f:
+            f.write('\n# ── Values from included charts ──────────────────────────────────────\n')
+            f.write(_yaml.dump(to_merge, default_flow_style=False, sort_keys=False))
 
     # ── Secrets ───────────────────────────────────────────────────────────────
 
