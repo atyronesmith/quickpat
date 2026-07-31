@@ -1,3 +1,12 @@
+# Spending Transaction Monitor — ApplicationSpec
+#
+# AI-powered fraud detection and spending alert system.
+# Uses LlamaStack for agent orchestration, pgvector for transaction embeddings,
+# MinIO for model storage, and Keycloak for SSO.
+#
+# Deployment targets: OpenShift 4.16+ with GPU nodes.
+# Operators installed: RHOAI, Serverless, Service Mesh, NFD, NVIDIA GPU Operator.
+
 apiVersion: supplychain/v1alpha1
 kind: ApplicationSpec
 
@@ -5,23 +14,45 @@ metadata:
   name: spending-transaction-monitor
   description: AI-powered fraud detection and spending alert system
   tier: sandbox
+  # devices: [gpu] tells the compiler to generate a values-gpu.yaml override
+  # file that moves GPU-specific operators (NFD, NVIDIA) out of values-prod.yaml
+  # and into a device-specific overlay. This allows the same pattern to be
+  # deployed on both GPU and CPU clusters.
   devices: [gpu]
 
 blocks:
 
+  # ── ai-platform-foundation ─────────────────────────────────────────────────
+  # Installs RHOAI, Serverless, and Service Mesh operators.
+  # Only kserve and dashboard are Managed — other components are excluded
+  # to minimize resource usage. trustyai is NOT needed here because this
+  # pattern uses LlamaStack for orchestration rather than TrustyAI guardrails.
   platform:
     type: ai-platform-foundation
     config:
       dsc:
-        kserve: Managed
-        dashboard: Managed
+        kserve: Managed           # required — runs the LLM InferenceService
+        dashboard: Managed        # RHOAI UI for monitoring model endpoints
+        # datasciencepipelines, workbenches, ray, kueue, trainingoperator
+        # are intentionally omitted (default to their RHOAI defaults).
+        # Add them explicitly as Removed if you want to prevent them from
+        # being enabled by a future RHOAI default change.
 
+  # ── gpu-compute ─────────────────────────────────────────────────────────────
+  # NFD + NVIDIA GPU Operator for GPU scheduling and driver management.
+  # mig_strategy: none — standard GPU nodes (not MIG-partitioned).
+  # dcgm: true — enables DCGM Exporter for Prometheus GPU metrics.
   gpu:
     type: gpu-compute
     config:
-      mig_strategy: none
-      dcgm: true
+      mig_strategy: none          # none = standard single-GPU mode (no partitioning)
+      dcgm: true                  # DCGM Exporter for GPU utilization metrics
 
+  # ── model-serving (LLM) ─────────────────────────────────────────────────────
+  # Llama 3.1 8B served via vLLM on GPU.
+  # OCI model storage (modelcar pattern) — no S3 download at pod startup;
+  # model weights are baked into the OCI image and mounted by the storage initializer.
+  # This block's output (predictor_host) is consumed by the llm-server block.
   llm:
     type: model-serving
     config:
@@ -29,33 +60,63 @@ blocks:
       runtime: vllm
       gpu: true
       storage:
+        # OCI model car — no MinIO needed for the LLM itself.
+        # The model-store block below is for detector/embedding models only.
         type: oci
         uri: oci://quay.io/redhat-ai-services/modelcar-catalog:llama-3.1-8b-instruct
 
+  # ── vector-store ─────────────────────────────────────────────────────────────
+  # PostgreSQL with pgvector extension for transaction embeddings.
+  # LlamaStack will use this as its memory store for RAG-based fraud detection.
+  # The block name 'db' is referenced by the llm-server block via inputs.
   db:
     type: vector-store
     config:
-      database: spending-monitor
+      database: spending-monitor  # PostgreSQL database name
 
+  # ── llama-stack ───────────────────────────────────────────────────────────────
+  # Deploys the RHOAI LlamaStack (OGX) operator instance.
+  # LlamaStack acts as the agent orchestration layer — it routes between
+  # the LLM, the vector store, and the application's tool calls.
+  #
+  # inputs:
+  #   llm: llm        — wires the LlamaStack instance to the vLLM InferenceService
+  #   vector_store: db — wires to the pgvector instance above
+  #
+  # port: 8321 is the LlamaStack gRPC/HTTP API port used by the backend service.
   llm-server:
     type: llama-stack
     config:
       port: 8321
     inputs:
-      llm: llm
-      vector_store: db
+      llm: llm                    # → uses the 'llm' model-serving block above
+      vector_store: db            # → uses the 'db' vector-store block above
 
+  # ── object-storage ─────────────────────────────────────────────────────────
+  # MinIO for storing embedding model weights (not the LLM — that uses OCI).
+  # The spending monitor uses smaller embedding models that are downloaded
+  # at first boot rather than baked into an OCI image.
+  # The data connection Secret created here is referenced by the embedding
+  # InferenceService (added via custom charts).
   model-store:
     type: object-storage
     config:
       provider: minio
       bucket: models
-      storage: 20Gi
+      storage: 20Gi               # 20 GiB for embedding model weights
 
+  # ── sso-auth ──────────────────────────────────────────────────────────────
+  # SSO authentication stub. The actual Keycloak instance is deployed as a
+  # custom component below — this block declares the SSO dependency so the
+  # compiler knows to include auth infrastructure in the operator set.
   auth:
     type: sso-auth
 
+# ── custom ────────────────────────────────────────────────────────────────────
+
 custom:
+  # FastAPI backend — processes transaction events, calls LlamaStack for
+  # fraud analysis, and exposes the alert API consumed by the frontend.
   spending-monitor-api:
     source:
       image: quay.io/rh-ai-quickstart/spending-monitor-api:latest
@@ -63,10 +124,12 @@ custom:
     ports:
       - name: http
         port: 8000
-        route: true
+        route: true               # external access via OpenShift Route
         tls:
           termination: edge
 
+  # React single-page application — user dashboard for viewing alerts,
+  # transaction history, and fraud probability scores.
   spending-monitor-ui:
     source:
       image: quay.io/rh-ai-quickstart/spending-monitor-ui:latest
@@ -78,6 +141,10 @@ custom:
         tls:
           termination: edge
 
+  # Keycloak for SSO — provides OIDC tokens that the API uses to authenticate
+  # users and scope their transaction data access.
+  # Version 26.x is used for RHBK compatibility in the QS path.
+  # In the VP path, replace this with an RHBK operator-managed Keycloak CR.
   keycloak:
     source:
       image: quay.io/keycloak/keycloak:26.0.7
@@ -89,10 +156,13 @@ custom:
         tls:
           termination: edge
 
+  # pgvector database — stores transaction embeddings for similarity search.
+  # PostgreSQL 16 with the pgvector extension pre-installed.
+  # Used by LlamaStack as its memory/RAG backend.
   spending-monitor-db:
     source:
       image: quay.io/rh-ai-quickstart/pgvector:pg16
     replicas: 1
     ports:
       - name: postgres
-        port: 5432
+        port: 5432                # internal only — no route needed

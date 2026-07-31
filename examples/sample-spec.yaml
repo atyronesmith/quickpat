@@ -1,47 +1,353 @@
-# Sample spec YAML for `quickpat new`
+# ApplicationSpec — annotated template
 #
-# Usage: quickpat new examples/sample-spec.yaml -o /tmp/test-new
+# Usage:
+#   cp examples/sample-spec.yaml my-app/spec.yaml
+#   # Edit to match your application
+#   quickpat compose my-app/spec.yaml              # → vp-out/ (Validated Pattern)
+#   quickpat compose my-app/spec.yaml --format qs  # → qs-out/ (Quickstart Helm chart)
 #
-# All fields except 'name' are optional.
+# Docs:
+#   Full tutorial:     https://github.com/atyronesmith/quickpat/blob/main/docs/compose-tutorial.md
+#   Block catalog:     https://github.com/atyronesmith/quickpat/blob/main/docs/compose-tutorial.md#block-types
+#   Adding blocks:     https://github.com/atyronesmith/quickpat/blob/main/docs/adding-block-types.md
+#   Real-world examples: examples/lemonade-stand-compose.yaml
+#
+# Every field is shown with its type, allowed values, and when to use it.
+# Delete sections that don't apply to your pattern.
 
-name: my-ai-app
-description: Custom AI application pattern
-tier: sandbox   # sandbox | tested | maintained
+apiVersion: supplychain/v1alpha1   # required — always this value
+kind: ApplicationSpec              # required — always this value
 
-charts:
-  - name: my-inference
-    path: ./charts/my-inference    # local chart (copied into pattern)
-    namespace: ai-inference
-    labels:
-      opendatahub.io/dashboard: "true"
+# ── metadata ─────────────────────────────────────────────────────────────────
 
-  - name: my-frontend
-    repo: https://charts.example.com  # external chart (referenced by URL)
-    version: "1.2.0"
-    namespace: frontend
+metadata:
+  name: my-ai-app                 # required — used as the pattern name in all generated files
+  description: >-                 # optional — shown in generated README and analysis report
+    What this pattern does. One or two sentences.
+  tier: sandbox                   # sandbox | tested | maintained
+                                  #   sandbox:    early-stage, no automated validation required
+                                  #   tested:     CI validates ArgoCD sync and pod readiness
+                                  #   maintained: CI + periodic upgrade testing + rollback docs
+  partner: NVIDIA                 # optional — partner name shown in generated docs
 
-operators:
-  - openshift-ai
-  - nvidia-gpu
+  # upstream: the existing Quickstart Helm chart this spec wraps.
+  # Set repo if your application chart already exists in a separate repo.
+  # The VP will reference it as a remote ArgoCD application.
+  # Leave as upstream: {} when all charts are declared as custom: below.
+  upstream:
+    repo: https://github.com/rh-ai-quickstart/my-app.git   # QS chart repo
+    path: chart                   # path inside that repo (default: chart)
+    branch: main                  # branch or tag (default: main)
+    # extraValues: {}             # extra values merged into the upstream app's ArgoCD entry
+    # ignoreDifferences: []       # ArgoCD ignoreDifferences for the upstream app
+    #   - group: route.openshift.io
+    #     kind: Route
+    #     jsonPointers: [/spec/host]
+
+  # target: pin all platform-specific output to a specific release.
+  # Controls operator channels, installPlanApproval, DSC defaults, and
+  # required co-dependencies. Omit to use the latest stable defaults.
+  # Override at compose time with: quickpat compose spec.yaml --target rhoai=3.5
+  # target:
+  #   platform: rhoai             # currently supported: rhoai
+  #   version: "3.5"             # known versions: 2.25, 3.0, 3.4, 3.5
+
+# ── blocks ────────────────────────────────────────────────────────────────────
+#
+# Blocks declare the infrastructure your application needs. Each block type
+# maps to a set of OLM operator subscriptions, optional infra CRs (DSC,
+# ClusterPolicy), and a namespace configuration. The compiler aggregates all
+# blocks and generates values-prod.yaml automatically.
+#
+# Each block is a named instance; the name is yours to choose.
+# Required keys: type  (block type from the catalog)
+# Optional keys: config (block-specific tuning), secrets, inputs, profile
+#
+# See docs/compose-tutorial.md#block-types for the full catalog.
+
+blocks:
+
+  # ── ai-platform-foundation ─────────────────────────────────────────────────
+  # Installs the three operators required by every RHOAI workload:
+  #   - Red Hat OpenShift AI (rhods-operator)
+  #   - OpenShift Serverless (serverless-operator)   [required by KServe]
+  #   - OpenShift Service Mesh (servicemeshoperator)  [required by KServe]
+  #
+  # Also generates a DataScienceCluster (DSC) CR that activates specific
+  # RHOAI components. List only the components your app uses — unused ones
+  # consume resources and increase the failure surface.
+  #
+  # Common DSC managementState values:
+  #   Managed  — operator installs and manages this component
+  #   Removed  — component is not installed (use for anything you don't need)
+  #   Unmanaged — installed but the operator won't reconcile changes
+  platform:
+    type: ai-platform-foundation
+    config:
+      dsc:
+        kserve: Managed           # required if you use model-serving blocks
+        dashboard: Managed        # RHOAI dashboard (usually keep Managed)
+        # trustyai: Managed       # required if you use guardrails-orchestrator
+        # modelmeshserving: Managed  # alternative serving runtime
+        # llamastackoperator: Managed  # required if you use llama-stack blocks
+        # mlflowoperator: Managed  # RHOAI 3.4+ only
+        datasciencepipelines: Removed  # remove components you don't use
+        workbenches: Removed
+        ray: Removed
+        kueue: Removed
+        trainingoperator: Removed
+
+  # ── gpu-compute ─────────────────────────────────────────────────────────────
+  # Installs the GPU driver stack:
+  #   - Node Feature Discovery (NFD) — labels GPU nodes for scheduling
+  #   - NVIDIA GPU Operator — drivers, DCGM metrics, device plugin
+  #   - ClusterPolicy CR — configures operator behavior
+  #
+  # Omit this block if your pattern runs on CPU only.
+  gpu:
+    type: gpu-compute
+    config:
+      mig_strategy: none          # none (standard GPUs) | single | mixed (A100/H100 with MIG)
+      dcgm: true                  # enable DCGM Exporter for GPU metrics (Prometheus)
+      vgpu_manager: false         # vGPU manager (enterprise GPU sharing)
+      driver:
+        upgrade_policy:
+          auto_upgrade: true      # allow operator to upgrade drivers automatically
+
+  # ── model-serving ───────────────────────────────────────────────────────────
+  # Generates a KServe ServingRuntime + InferenceService.
+  # Profiles:
+  #   llm-inference — vLLM on GPU, scale-to-zero capable (min replicas: 0)
+  #   (default)     — CPU-based custom runtime, always-on
+  #
+  # Storage types:
+  #   oci  — model pulled from an OCI image (modelcar pattern, no S3 needed)
+  #   s3   — model pulled from S3/MinIO at pod startup
+  llm:
+    type: model-serving
+    profile: llm-inference        # use llm-inference for vLLM on GPU
+    config:
+      model: meta-llama/Llama-3.2-3B-Instruct  # HuggingFace model ID
+      runtime: vllm               # vllm | tgis | caikit | custom
+      image: quay.io/modh/vllm:rhoai-2.19-cuda  # serving runtime container
+      gpu: true                   # set false for CPU-only models
+      replicas:
+        min: 0                    # 0 = scale to zero when idle (GPU cost saving)
+        max: 1
+      resources:
+        requests: { cpu: 1, memory: 8Gi, gpu: 1 }
+        limits:   { cpu: 4, memory: 20Gi, gpu: 1 }
+      storage:
+        type: oci                 # oci (fastest) | s3 (flexible)
+        uri: oci://quay.io/redhat-ai-services/modelcar-catalog:llama-3.2-3b-instruct
+    secrets:
+      # Block-level secrets generate ExternalSecrets + values-secret.yaml.template entries.
+      # Only use block-level secrets if you don't have a pattern-secrets custom chart.
+      # If you have a pattern-secrets chart, use the top-level secrets: section instead.
+      vllm-api-key:
+        vault_path: my-app/llm   # Vault key path
+        generate: false           # false = user must supply; true = auto-generate
+
+  # ── object-storage ──────────────────────────────────────────────────────────
+  # Deploys a MinIO instance (or references an S3/ODF bucket).
+  # Outputs: connection_name — the RHOAI data connection Secret name,
+  #          referenced by model-serving blocks via {{ blocks.storage.output.connection_name }}
+  #
+  # Use when: you need to pre-load model weights or store application data.
+  # Skip when: using OCI model storage (type: oci) — no S3 needed.
+  storage:
+    type: object-storage
+    config:
+      provider: minio             # minio | odf | s3
+      storage: 50Gi               # PVC size for minio
+      # init_models:              # HuggingFace models to download at first boot
+      #   - ibm-granite/granite-guardian-hap-125m
+    secrets:
+      access-key:
+        vault_path: my-app/minio
+        key: AWS_ACCESS_KEY_ID
+      secret-key:
+        vault_path: my-app/minio
+        key: AWS_SECRET_ACCESS_KEY
+
+  # ── guardrails-orchestrator ─────────────────────────────────────────────────
+  # Deploys a TrustyAI GuardrailsOrchestrator CR.
+  # Requires trustyai: Managed in the ai-platform-foundation block's DSC config.
+  # guardrails:
+  #   type: guardrails-orchestrator
+  #   config:
+  #     enable_built_in_detectors: true
+  #     otel_protocol: grpc
+  #     detectors:
+  #       hap:
+  #         endpoint: "{{ blocks.my-hap-detector.output.predictor_host }}"
+  #         port: 8000
+  #     llm:
+  #       endpoint: "{{ blocks.llm.output.predictor_host }}"
+
+  # ── vector-store ────────────────────────────────────────────────────────────
+  # Deploys a pgvector PostgreSQL instance.
+  # db:
+  #   type: vector-store
+  #   config:
+  #     database: my-app-db
+
+  # ── llama-stack ─────────────────────────────────────────────────────────────
+  # Deploys RHOAI LlamaStack (OGX). Requires llamastackoperator: Managed in DSC.
+  # stack:
+  #   type: llama-stack
+  #   inputs:
+  #     llm: llm                  # which model-serving block provides the LLM
+  #     vector_store: db          # which vector-store block to connect
+
+  # ── openshift-virtualization ────────────────────────────────────────────────
+  # Installs KubeVirt for per-user VM isolation (AI agent sandboxes).
+  # virt:
+  #   type: openshift-virtualization
+
+  # ── keycloak-oidc ────────────────────────────────────────────────────────────
+  # Installs RHBK (Red Hat Build of Keycloak) for OIDC authentication.
+  # identity:
+  #   type: keycloak-oidc
+  #   config:
+  #     realm: my-app
+  #     operator_channel: stable-v26
+
+  # ── vm-workspace ─────────────────────────────────────────────────────────────
+  # Per-user KubeVirt VM sandboxes. Requires openshift-virtualization block.
+  # sandbox:
+  #   type: vm-workspace
+  #   config:
+  #     namespace_mode: shared    # shared | perUser
+  #   inputs:
+  #     oidc_issuer: "{{ blocks.identity.output.issuer_url }}"
+
+# ── wiring ────────────────────────────────────────────────────────────────────
+#
+# Wiring documents data-flow relationships between blocks.
+# It is descriptive — it does NOT generate Kubernetes resources.
+# Runtime connectivity uses Kubernetes service DNS.
+# Include it when connections are non-obvious.
+#
+# Format: from → to via <semantic label>
+
+wiring:
+  - from: storage
+    to: llm
+    via: model-weights            # model weights are fetched from MinIO at startup
+  # - from: guardrails
+  #   to: llm
+  #   via: chat-generation        # guardrails proxy all requests to the LLM
+
+# ── secrets ───────────────────────────────────────────────────────────────────
+#
+# Top-level secrets are the canonical way to declare secrets for patterns
+# that use a hand-written pattern-secrets chart (which handles ExternalSecrets).
+# Each entry maps to one named group in Vault and one entry in
+# values-secret.yaml.template (VP v2 backingStore format).
+#
+# Use top-level secrets when:
+#   - You have a pattern-secrets custom chart (avoid duplicating ExternalSecrets)
+#   - You want to list all secrets in one place for documentation
+#
+# Use block-level secrets (inside a block's secrets: key) when:
+#   - You want quickpat to auto-generate the ExternalSecret chart for that secret
+#
+# onMissingValue: prompt  — user must provide the value at deploy time
+#                 skip    — ExternalSecret created, Vault path left empty
+#                 generate — value auto-generated by Vault policy
 
 secrets:
-  - name: hf_token
-    onMissingValue: prompt     # user provides at deploy time
-  - name: db_password
-    onMissingValue: generate   # auto-generate with vault policy
+  - name: hf-token                # display name = last segment of vault_path by convention
+    vault_path: my-app/hf-token   # Vault key path: secret/data/hub/<vault_path>
+    fields:
+      - name: value               # field within that Vault key
 
+  - name: openai                  # optional provider — skip if not set
+    vault_path: my-app/openai
+    onMissingValue: skip
+    fields:
+      - name: api_key
+
+# vault: enabled wires up Vault + ESO infrastructure.
+# Required whenever you use top-level secrets or block-level secrets.
 vault:
-  enabled: true
+  enabled: true                   # adds vault + openshift-external-secrets to values-prod.yaml
 
-# ArgoCD ignoreDifferences — only add for specific known sync issues.
-# Do not use as a general-purpose workaround.
-# ignoreDifferences:
-#   - group: route.openshift.io
-#     kind: Route
-#     jsonPointers:
-#       - /spec/host
+# ── custom ────────────────────────────────────────────────────────────────────
+#
+# Custom components are application-specific charts that cannot be expressed
+# as parameterized blocks. Their Helm templates live in charts/<name>/ and are
+# copied into the VP and QS outputs.
+#
+# A component belongs here (not in blocks) when:
+#   - Its container image is specific to this application
+#   - Its behavior cannot be described by a block type's parameter surface
+#
+# deploy: argocd (default) — creates an ArgoCD app in values-prod.yaml
+# deploy: manual           — chart is in the repo for reference/apply but
+#                            NOT managed by ArgoCD (use for build-time steps)
+
+custom:
+  my-app-frontend:
+    description: React frontend for the application
+    source:
+      image: quay.io/my-org/my-app-frontend:1.0.0  # container image
+    replicas: 1
+    ports:
+      - name: http
+        port: 8080
+        route: true               # creates an OpenShift Route
+        tls: { termination: edge }
+    env:
+      API_URL: "{{ blocks.llm.output.predictor_host }}"
+    probes:
+      liveness:  { path: /health, port: 8080 }
+      readiness: { path: /health, port: 8080 }
+    resources:
+      requests: { cpu: 250m, memory: 512Mi }
+      limits:   { cpu: 500m, memory: 1Gi }
+
+  my-app-backend:
+    description: FastAPI backend — hand-written chart in charts/my-app-backend/
+    source:
+      chart: charts/my-app-backend    # local chart (copied into vp-out/charts/)
+    namespace: my-app               # namespace for the ArgoCD app (default: pattern name)
+    extraValueFiles:                # additional values files for this ArgoCD app
+      - /overrides/my-app-backend.yaml
+
+  build-images:
+    description: In-cluster image build pipeline (one-time)
+    deploy: manual                  # NOT an ArgoCD app — apply with: helm install ...
+    source:
+      chart: image-builder-charts/
+    namespace: build-ns
+
+# ── docs ──────────────────────────────────────────────────────────────────────
+#
+# Source documentation files processed into both vp-out/ and qs-out/ READMEs.
+# Use <!-- vp-only --> / <!-- qs-only --> / <!-- end --> markers inside the
+# source file to conditionally include sections per output.
+# Marker lines are always stripped — they don't appear in the rendered output.
+#
+# deploy: both (default) — file written to both vp-out/ and qs-out/
+# deploy: vp             — only written to vp-out/
+# deploy: qs             — only written to qs-out/
+
+docs:
+  - source: docs/README.md        # relative to spec.yaml
+    target: README.md             # path inside vp-out/ and qs-out/
+  # - source: docs/INSTALL.md
+  #   target: docs/INSTALL.md
+  #   deploy: vp                  # VP-only doc (e.g. ArgoCD instructions)
+
+# ── options ───────────────────────────────────────────────────────────────────
 
 options:
   syncPolicy: Automatic           # Automatic | Manual
-  installPlanApproval: Automatic   # Automatic | Manual
-  clustergroup_version: "0.9.*"
+                                  #   Automatic: ArgoCD auto-syncs on every git push
+                                  #   Manual: operator reviews diffs before applying
+  installPlanApproval: Automatic  # Automatic | Manual
+                                  #   Manual is set automatically when using --target
+  clustergroup_version: "0.9.*"   # VP framework clustergroup chart version
+  multiSourceConfig: true         # required when any app uses extraValueFiles
