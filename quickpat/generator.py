@@ -423,20 +423,30 @@ class PatternGenerator:
         This is the format expected by the VP secret loader:
             https://validatedpatterns.io/learn/secrets-management-in-the-validated-patterns-framework/
 
-        Each TopLevelSecret in the spec maps to one entry under secrets: with
-        value: null as a placeholder for the user to fill in before deploying.
+        Each TopLevelSecret in the spec maps to one entry under secrets:.
+        The VP loader defaults a field's onMissingValue to 'error', which
+        fails validation on an empty value — so every field must carry an
+        explicit onMissingValue matching the secret's on_missing:
+          - 'generate': the loader auto-generates the value; no value key.
+          - 'skip' / 'prompt' (default): the VP loader has no 'skip' concept,
+            so both map to 'prompt' with an empty default — the closest
+            equivalent to the QS path's "press Enter to skip" behavior.
         """
-        from pathlib import Path as _Path
-
         secrets_entries = []
         for secret in top_level_secrets:
-            # value: '' is the VP v2 placeholder — None serialises to YAML null
-            # which is not a valid VP secret loader form.
-            fields = [{'name': f.name, 'value': ''} for f in secret.fields]
+            if secret.on_missing == 'generate':
+                fields = [{
+                    'name': f.name,
+                    'onMissingValue': 'generate',
+                    'vaultPolicy': 'validatedPatternDefaultPolicy',
+                } for f in secret.fields]
+            else:
+                fields = [{'name': f.name, 'value': '', 'onMissingValue': 'prompt'}
+                          for f in secret.fields]
             if not fields:
                 # Declared secret with no fields — add a single 'value' field
                 # as a placeholder so the template is always well-formed.
-                fields = [{'name': 'value', 'value': ''}]
+                fields = [{'name': 'value', 'value': '', 'onMissingValue': 'prompt'}]
             secrets_entries.append({'name': secret.name, 'fields': fields})
 
         doc = {

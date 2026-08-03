@@ -890,13 +890,38 @@ class TestVP2SecretTemplate:
         for secret in tmpl['secrets']:
             assert 'vaultPrefixes' not in secret
 
-    def test_no_on_missing_value_in_template(self, tmp_path):
-        # Template fields should only have name + value, not onMissingValue
+    def test_on_missing_value_prompt_for_skip_and_default(self, tmp_path):
+        # The VP loader defaults a missing onMissingValue to 'error', which
+        # fails validation on an empty value. Every field must carry an
+        # explicit onMissingValue. 'skip' has no VP-loader equivalent, so it
+        # (and the unset default) maps to 'prompt' with an empty value —
+        # the operator can leave it blank at install time without a hard
+        # validation failure.
         out = _compose(tmp_path, _SECRETS_SPEC)
         tmpl = _read_yaml(out / 'values-secret.yaml.template')
         for secret in tmpl['secrets']:
             for f in secret['fields']:
-                assert 'onMissingValue' not in f
+                assert f['onMissingValue'] == 'prompt'
+                assert f['value'] == ''
+
+    def test_generate_secrets_get_generate_on_missing_value(self, tmp_path):
+        # on_missing: generate must map straight through, with a vaultPolicy
+        # (required by the VP loader's generate-mode validation) and no
+        # value key (generate-mode fields must not carry a value).
+        spec_with_generate = _SECRETS_SPEC + """\
+  - name: session-secret
+    vault_path: secrets-test/session-secret
+    onMissingValue: generate
+    fields:
+      - name: value
+"""
+        out = _compose(tmp_path, spec_with_generate)
+        tmpl = _read_yaml(out / 'values-secret.yaml.template')
+        gen = next(s for s in tmpl['secrets'] if s['name'] == 'session-secret')
+        for f in gen['fields']:
+            assert f['onMissingValue'] == 'generate'
+            assert f['vaultPolicy'] == 'validatedPatternDefaultPolicy'
+            assert 'value' not in f
 
 
 # ── Doc filtering and spec docs pipeline ─────────────────────────────────────
