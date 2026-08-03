@@ -252,14 +252,12 @@ class PatternGenerator:
 
     def _build_applications(self, app_name, app_namespace, use_vault):
         applications = {}
-        group_name = self.config.get('cluster_group_name', 'prod')
 
         # Vault and external secrets (standard infrastructure)
         if use_vault:
             applications['vault'] = {
                 'name': 'vault',
                 'namespace': 'vault',
-                'project': group_name,
                 'chart': 'hashicorp-vault',
                 'chartVersion': cfg(
                     "infrastructure.vault_chart_version", "0.1.*"
@@ -268,7 +266,6 @@ class PatternGenerator:
             applications['openshift-external-secrets'] = {
                 'name': 'openshift-external-secrets',
                 'namespace': 'external-secrets',
-                'project': group_name,
                 'chart': 'openshift-external-secrets',
                 'chartVersion': cfg(
                     "infrastructure.external_secrets_chart_version", "0.0.*"
@@ -295,7 +292,6 @@ class PatternGenerator:
                 applications[chart_name] = {
                     'name': chart_name,
                     'namespace': ic['namespace'],
-                    'project': group_name,
                     'path': f'charts/{chart_name}',
                 }
 
@@ -308,7 +304,6 @@ class PatternGenerator:
                 applications[name] = {
                     'name': name,
                     'namespace': ns,
-                    'project': group_name,
                     'path': f'charts/{name}',
                 }
             elif strategy == 'remote':
@@ -321,7 +316,6 @@ class PatternGenerator:
                 app_entry = {
                     'name': name,
                     'namespace': ns,
-                    'project': group_name,
                     'repoURL': git_url,
                     'path': chart_path,
                     'chartVersion': self.config.get('chart_branch', 'main'),
@@ -350,7 +344,6 @@ class PatternGenerator:
                 applications[name] = {
                     'name': name,
                     'namespace': ns,
-                    'project': group_name,
                     'repoURL': repo_url,
                     'chart': name,
                     'targetRevision': self.config.get(
@@ -366,7 +359,6 @@ class PatternGenerator:
             applications[secrets_chart_name] = {
                 'name': secrets_chart_name,
                 'namespace': app_namespace,
-                'project': group_name,
                 'path': f'charts/{secrets_chart_name}',
             }
 
@@ -383,7 +375,6 @@ class PatternGenerator:
             app_entry = {
                 'name': comp_name,
                 'namespace': ns,
-                'project': group_name,
                 'path': f'charts/{comp_name}',
             }
             if hasattr(comp, 'extra_value_files') and comp.extra_value_files:
@@ -1058,7 +1049,6 @@ podman run -it --rm --pull=newer \
         # When the spec declares devices: [cpu, gpu], generate per-device overrides.
         # GPU operators (NFD + NVIDIA) live here rather than in values-prod.yaml.
         devices = self.config.get('devices', [])
-        group_name = self.config.get('cluster_group_name', 'prod')
         operators = self.config.get('operators', [])
         device_ops = self._device_operators()
 
@@ -1083,7 +1073,6 @@ podman run -it --rm --pull=newer \
                     gpu_apps[ic['chart_name']] = {
                         'name': ic['chart_name'],
                         'namespace': ic['namespace'],
-                        'project': group_name,
                         'path': f'charts/{ic["chart_name"]}',
                     }
             gpu_data = {'clusterGroup': {

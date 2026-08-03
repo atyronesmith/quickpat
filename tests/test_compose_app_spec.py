@@ -775,6 +775,28 @@ class TestVaultEnabled:
         apps = _read_yaml(out / 'values-prod.yaml')['clusterGroup']['applications']
         assert 'vault' in apps
 
+    def test_no_dangling_project_reference(self, tmp_path):
+        # The clustergroup chart only creates an ArgoCD AppProject for names
+        # listed under clusterGroup.argoProjects/projects -- quickpat never
+        # emits that list, so any application.project value other than the
+        # chart's own "default" fallback (coalesce .argoProject .project
+        # "default") points at a project that doesn't exist, and ArgoCD
+        # refuses to sync it (InvalidSpecError: "Application referencing
+        # project <x> which does not exist"). Applications must therefore
+        # omit `project` entirely and let it default.
+        out = _compose(tmp_path, _VAULT_ENABLED_SPEC)
+        prod = _read_yaml(out / 'values-prod.yaml')
+        apps = prod['clusterGroup']['applications']
+        assert apps, "expected at least one generated application"
+        for name, app in apps.items():
+            assert 'project' not in app, (
+                f"application {name!r} sets project={app.get('project')!r}, "
+                "but no matching clusterGroup.argoProjects entry is ever "
+                "generated -- this must be omitted, not set to clusterGroupName"
+            )
+        assert 'argoProjects' not in prod['clusterGroup']
+        assert 'projects' not in prod['clusterGroup']
+
     def test_eso_subscription_present(self, tmp_path):
         out = _compose(tmp_path, _VAULT_ENABLED_SPEC)
         subs = _read_yaml(out / 'values-prod.yaml')['clusterGroup']['subscriptions']
