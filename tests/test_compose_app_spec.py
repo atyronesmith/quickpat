@@ -769,6 +769,55 @@ custom:
 """
 
 
+_MODEL_SERVING_SPEC = """\
+apiVersion: supplychain/v1alpha1
+kind: ApplicationSpec
+metadata:
+  name: model-serving-test
+  tier: sandbox
+  upstream:
+    repo: https://github.com/example/model-serving-qs.git
+blocks:
+  llm:
+    type: model-serving
+    config:
+      model: meta-llama/Llama-3.2-3B-Instruct
+      runtime: vllm
+      image: quay.io/modh/vllm:rhoai-2.19-cuda
+      gpu: true
+      replicas:
+        min: 0
+        max: 1
+      resources:
+        requests: {cpu: 1, memory: 8Gi}
+        limits: {cpu: 4, memory: 20Gi}
+      storage:
+        type: oci
+        uri: oci://quay.io/redhat-ai-services/modelcar-catalog:llama-3.2-3b-instruct
+wiring: []
+custom: {}
+"""
+
+
+class TestAppNamespaceNoSpuriousOperatorGroup:
+    def test_oai_labels_namespace_has_no_operator_group(self, tmp_path):
+        # model-serving needs opendatahub.io/dashboard labels on its app
+        # namespace, but no operator subscription targets that namespace --
+        # any namespace an operator subscription actually needs is already
+        # claimed by the operator-namespace loop before this one runs. Setting
+        # operatorGroup/targetNamespaces here anyway leaves a stray
+        # OperatorGroup that blocks installing a real operator into this
+        # namespace later (OLM allows only one per namespace). Found by
+        # comparing quickpat's lemonade-stand output against dminnear's
+        # hand-crafted reference, which never sets it here either.
+        out = _compose(tmp_path, _MODEL_SERVING_SPEC)
+        namespaces = _read_yaml(out / 'values-prod.yaml')['clusterGroup']['namespaces']
+        app_ns = namespaces['model-serving-test']
+        assert app_ns.get('labels', {}).get('opendatahub.io/dashboard') == 'true'
+        assert 'operatorGroup' not in app_ns
+        assert 'targetNamespaces' not in app_ns
+
+
 class TestVaultEnabled:
     def test_vault_app_in_values_prod(self, tmp_path):
         out = _compose(tmp_path, _VAULT_ENABLED_SPEC)

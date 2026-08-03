@@ -201,9 +201,15 @@ class PatternGenerator:
                 continue
             seen.add(ns)
             if ns in ns_needs_labels:
+                # No operatorGroup/targetNamespaces here: any namespace an
+                # operator subscription actually targets was already claimed
+                # by the "Operator namespaces" loop above (and would have hit
+                # the `ns in seen` check), so an app namespace reaching this
+                # branch never has a subscription pointed at it. Setting one
+                # anyway leaves a stray OperatorGroup that blocks installing a
+                # real operator into this namespace later (OLM allows only
+                # one per namespace).
                 namespaces[ns] = {
-                    'operatorGroup': True,
-                    'targetNamespaces': [ns],
                     'labels': {
                         'opendatahub.io/dashboard': 'true',
                         'modelmesh-enabled': 'false',
