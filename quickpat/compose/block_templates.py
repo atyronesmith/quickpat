@@ -1215,29 +1215,39 @@ def build_create_secrets_sh(
         name = decl['secret_name']
         keys = decl['keys']
         generate = decl.get('generate', False)
+        optional = decl.get('optional', False)
 
-        lines.append(f'# Secret: {name}')
+        label = f'# Secret: {name}' + ('  (optional — press Enter to skip)' if optional else '')
+        lines.append(label)
         key_args = []
+        prompt_vars = []
 
         for k in keys:
+            prompt_var = k.upper().replace('-', '_')
+            prompt_vars.append(prompt_var)
             if generate:
                 lines.append(
-                    f'{k.upper().replace("-", "_")}=$(openssl rand -base64 16 | tr -dc a-zA-Z0-9 | head -c 20)'
+                    f'{prompt_var}=$(openssl rand -base64 16 | tr -dc a-zA-Z0-9 | head -c 20)'
                 )
-                key_args.append(f'  --from-literal={k}="${{{k.upper().replace("-", "_")}}}"')
             else:
-                prompt_var = k.upper().replace('-', '_')
-                lines.append(f'read -rsp "Enter {k} for {name}: " {prompt_var}; echo')
-                key_args.append(f'  --from-literal={k}="${{{prompt_var}}}"')
+                suffix = ' (optional)' if optional else ''
+                lines.append(f'read -rsp "Enter {k} for {name}{suffix}: " {prompt_var}; echo')
+            key_args.append(f'  --from-literal={k}="${{{prompt_var}}}"')
 
         if key_args:
-            lines += [
+            create_block = [
                 f'oc create secret generic {name} \\',
-                *[f'{a} \\' for a in key_args[:-1]],
-                f'{key_args[-1]}',
+                *[f'{a} \\' for a in key_args],
                 f'  -n "$NAMESPACE" --dry-run=client -o yaml | oc apply -f -',
-                '',
             ]
+            if optional and not generate:
+                # Only create the secret if the user supplied at least one field.
+                guard = ''.join(f'${{{pv}}}' for pv in prompt_vars)
+                lines.append(f'if [ -n "{guard}" ]; then')
+                lines += [f'  {l}' for l in create_block]
+                lines += ['else', f'  echo "Skipping {name} (no value provided)."', 'fi', '']
+            else:
+                lines += [*create_block, '']
 
     lines += [
         'echo "Secrets created successfully."',

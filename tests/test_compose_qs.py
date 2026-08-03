@@ -656,3 +656,175 @@ custom: {}
         ingest = spec.blocks['ingest']
         assert ingest.inputs.get('vector_store') == 'db'
         assert ingest.inputs.get('object_storage') == 'store'
+
+
+# ── Top-level secrets (Vault-free QS path) ──────────────────────────────────
+
+
+TOP_SECRETS_SPEC = """\
+apiVersion: supplychain/v1alpha1
+kind: ApplicationSpec
+metadata:
+  name: sec-test
+  tier: sandbox
+  upstream: {}
+blocks:
+  platform:
+    type: ai-platform-foundation
+secrets:
+  - name: gemini
+    vault_path: sec-test/gemini
+    onMissingValue: skip
+    fields:
+      - name: api_key
+  - name: ssh
+    vault_path: sec-test/ssh
+    fields:
+      - name: private_key
+      - name: public_key
+wiring: []
+custom: {}
+"""
+
+
+class TestTopLevelSecrets:
+    """Top-level secrets: render as plain Secrets, not Vault ExternalSecrets."""
+
+    def test_secret_template_created_per_secret(self, tmp_path):
+        out = _qs(tmp_path, TOP_SECRETS_SPEC)
+        assert (out / 'chart' / 'templates' / 'secrets' / 'gemini.yaml').exists()
+        assert (out / 'chart' / 'templates' / 'secrets' / 'ssh.yaml').exists()
+
+    def test_secret_template_is_plain_secret_not_external(self, tmp_path):
+        out = _qs(tmp_path, TOP_SECRETS_SPEC)
+        gemini = (out / 'chart' / 'templates' / 'secrets' / 'gemini.yaml').read_text()
+        assert 'kind: Secret' in gemini
+        assert 'ExternalSecret' not in gemini
+        assert 'name: gemini' in gemini
+        assert 'api_key:' in gemini
+
+    def test_values_yaml_has_camelcase_secret_keys(self, tmp_path):
+        out = _qs(tmp_path, TOP_SECRETS_SPEC)
+        values = (out / 'chart' / 'values.yaml').read_text()
+        assert 'geminiApiKey' in values
+        assert 'sshPrivateKey' in values
+        assert 'sshPublicKey' in values
+
+    def test_template_and_values_keys_agree(self, tmp_path):
+        out = _qs(tmp_path, TOP_SECRETS_SPEC)
+        gemini = (out / 'chart' / 'templates' / 'secrets' / 'gemini.yaml').read_text()
+        # Template must reference the exact key present in values.yaml
+        assert '.Values.secrets.geminiApiKey' in gemini
+
+    def test_create_secrets_creates_each_secret(self, tmp_path):
+        out = _qs(tmp_path, TOP_SECRETS_SPEC)
+        sh = (out / 'scripts' / 'create-secrets.sh').read_text()
+        assert 'oc create secret generic gemini' in sh
+        assert 'oc create secret generic ssh' in sh
+        assert '--from-literal=private_key=' in sh
+        assert '--from-literal=public_key=' in sh
+
+    def test_optional_secret_is_guarded(self, tmp_path):
+        out = _qs(tmp_path, TOP_SECRETS_SPEC)
+        sh = (out / 'scripts' / 'create-secrets.sh').read_text()
+        # gemini is onMissingValue: skip -> only created if a value is supplied
+        assert 'Skipping gemini' in sh
+
+    def test_required_secret_is_not_guarded(self, tmp_path):
+        out = _qs(tmp_path, TOP_SECRETS_SPEC)
+        sh = (out / 'scripts' / 'create-secrets.sh').read_text()
+        assert 'Skipping ssh' not in sh
+
+    def test_create_secrets_is_valid_bash(self, tmp_path):
+        import subprocess
+        out = _qs(tmp_path, TOP_SECRETS_SPEC)
+        sh = out / 'scripts' / 'create-secrets.sh'
+        r = subprocess.run(['bash', '-n', str(sh)], capture_output=True, text=True)
+        assert r.returncode == 0, f"bash syntax error: {r.stderr}"
+
+    def test_no_vault_references_anywhere(self, tmp_path):
+        out = _qs(tmp_path, TOP_SECRETS_SPEC)
+        for path in (out / 'chart').rglob('*.yaml'):
+            text = path.read_text()
+            assert 'ExternalSecret' not in text, f"ExternalSecret leaked into {path}"
+            assert 'vaultPrefix' not in text, f"vaultPrefix leaked into {path}"
+
+
+class TestExternalSecretStripping:
+    """Custom-chart ExternalSecrets are dropped from the QS output."""
+
+    def test_is_external_secret_detects_kind(self, tmp_path):
+        from quickpat.compose.qs_generator import QSGenerator
+        es = tmp_path / 'es.yaml'
+        es.write_text('apiVersion: external-secrets.io/v1\nkind: ExternalSecret\n')
+        plain = tmp_path / 'plain.yaml'
+        plain.write_text('apiVersion: v1\nkind: Secret\n')
+        assert QSGenerator._is_external_secret(es) is True
+        assert QSGenerator._is_external_secret(plain) is False
+
+    def test_copy_skips_external_secrets(self, tmp_path):
+        from quickpat.compose.qs_generator import QSGenerator
+        src = tmp_path / 'src'
+        (src).mkdir()
+        (src / 'es.yaml').write_text('kind: ExternalSecret\n')
+        (src / 'keep.yaml').write_text('kind: ConfigMap\n')
+        dst = tmp_path / 'dst'
+        gen = QSGenerator.__new__(QSGenerator)  # no __init__ needed for static/instance copy
+        gen._copy_templates_no_externalsecrets(src, dst)
+        assert (dst / 'keep.yaml').exists()
+        assert not (dst / 'es.yaml').exists()
+
+    def test_is_external_secret_multidoc_mixed_is_not_pure(self, tmp_path):
+        """A file mixing a Secret and an ExternalSecret is not a pure-ES file."""
+        from quickpat.compose.qs_generator import QSGenerator
+        mixed = tmp_path / 'mixed.yaml'
+        mixed.write_text(
+            'apiVersion: v1\nkind: Secret\nmetadata:\n  name: keep\n'
+            '---\n'
+            'apiVersion: external-secrets.io/v1\nkind: ExternalSecret\n'
+            'metadata:\n  name: drop\n'
+        )
+        assert QSGenerator._is_external_secret(mixed) is False
+
+    def test_copy_strips_only_external_secret_doc_from_multidoc(self, tmp_path):
+        """Mixed multi-doc file: Secret is kept, ExternalSecret doc removed."""
+        from quickpat.compose.qs_generator import QSGenerator
+        src = tmp_path / 'src'
+        src.mkdir()
+        (src / 'mixed.yaml').write_text(
+            'apiVersion: v1\nkind: Secret\nmetadata:\n  name: keep\n'
+            '---\n'
+            'apiVersion: external-secrets.io/v1\nkind: ExternalSecret\n'
+            'metadata:\n  name: drop\n'
+        )
+        dst = tmp_path / 'dst'
+        gen = QSGenerator.__new__(QSGenerator)
+        gen._copy_templates_no_externalsecrets(src, dst)
+        out = (dst / 'mixed.yaml').read_text()
+        assert 'kind: Secret' in out
+        assert 'ExternalSecret' not in out
+        assert 'name: keep' in out
+        assert 'name: drop' not in out
+
+    def test_copy_drops_file_of_only_external_secrets(self, tmp_path):
+        """A multi-doc file that is all ExternalSecrets is dropped entirely."""
+        from quickpat.compose.qs_generator import QSGenerator
+        src = tmp_path / 'src'
+        src.mkdir()
+        (src / 'all_es.yaml').write_text(
+            'kind: ExternalSecret\nmetadata:\n  name: a\n'
+            '---\n'
+            'kind: ExternalSecret\nmetadata:\n  name: b\n'
+        )
+        dst = tmp_path / 'dst'
+        gen = QSGenerator.__new__(QSGenerator)
+        gen._copy_templates_no_externalsecrets(src, dst)
+        assert not (dst / 'all_es.yaml').exists()
+
+
+def test_secret_value_key_normalises_snake_and_kebab():
+    from quickpat.compose.qs_generator import _secret_value_key
+    assert _secret_value_key('gemini', 'api_key') == 'geminiApiKey'
+    assert _secret_value_key('brave-search', 'api_key') == 'braveSearchApiKey'
+    assert _secret_value_key('vertex', 'sa_json') == 'vertexSaJson'
+    assert _secret_value_key('ssh', 'private_key') == 'sshPrivateKey'
