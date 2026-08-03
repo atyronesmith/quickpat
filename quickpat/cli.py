@@ -143,6 +143,43 @@ def main():
         ),
     )
 
+    # publish-vp subcommand
+    publish_p = subparsers.add_parser(
+        'publish-vp',
+        help=(
+            'Publish vp-out/ to an immutable, versioned tag whose tree is at '
+            'the repo root (deployable by the Validated Patterns operator)'
+        ),
+    )
+    publish_p.add_argument(
+        'vp_out_dir', nargs='?', default='vp-out',
+        help='Path to the vp-out directory (default: ./vp-out)',
+    )
+    publish_p.add_argument('--remote', default='origin', help='Git remote (default: origin)')
+    publish_p.add_argument(
+        '--repo-url', help='Override remote URL to query/push (default: derive from --remote)'
+    )
+    publish_p.add_argument(
+        '--tag-prefix', default='vp-v', help='Version tag prefix (default: vp-v)'
+    )
+    publish_p.add_argument('-m', '--message', help='Commit/tag message override')
+    publish_p.add_argument(
+        '--pattern-name',
+        help='Pattern name for the oc patch hint (default: from pattern-metadata.yaml)',
+    )
+    publish_p.add_argument(
+        '--namespace', default='patterns-operator',
+        help='Namespace for the oc patch hint (default: patterns-operator)',
+    )
+    publish_p.add_argument(
+        '--allow-dirty', action='store_true',
+        help='Publish on-disk vp-out even if it has uncommitted changes',
+    )
+    publish_p.add_argument(
+        '--dry-run', action='store_true',
+        help='Show what would be published without creating or pushing anything',
+    )
+
     # batch subcommand
     batch_p = subparsers.add_parser(
         'batch', help='Transform all registered quickstarts'
@@ -252,6 +289,8 @@ def main():
         cmd_validate_spec(args)
     elif args.command == 'init-ci':
         cmd_init_ci(args)
+    elif args.command == 'publish-vp':
+        cmd_publish_vp(args)
 
 
 def _add_transform_args(parser):
@@ -594,6 +633,55 @@ def cmd_compose(args):
         for w in result.warnings:
             print(f"Error: {w}", file=sys.stderr)
         sys.exit(1)
+
+
+def cmd_publish_vp(args):
+    """Publish vp-out/ to an immutable, versioned tag at the repo root."""
+    from .publish import publish_vp, PublishError
+
+    try:
+        result = publish_vp(
+            vp_out_dir=args.vp_out_dir,
+            remote=args.remote,
+            repo_url=args.repo_url,
+            tag_prefix=args.tag_prefix,
+            message=args.message,
+            pattern_name=args.pattern_name,
+            namespace=args.namespace,
+            dry_run=args.dry_run,
+            allow_dirty=args.allow_dirty,
+        )
+    except PublishError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    for w in result.warnings:
+        print(f"Warning: {w}")
+
+    if result.no_op:
+        print(f"No changes in {args.vp_out_dir} since {result.tag} — nothing to publish.")
+        return
+
+    if result.dry_run:
+        print(f"[dry-run] Would publish {result.tag}"
+              + (f" (parent {result.parent_tag})" if result.parent_tag else ""))
+        print(f"[dry-run] tree {result.tree} — no commit, tag, or push created")
+        print(f"[dry-run] {result.oc_patch_cmd}")
+        return
+
+    print(f"Published {result.tag}")
+    print(f"  commit:  {result.commit}")
+    if result.parent_tag:
+        print(f"  parent:  {result.parent_tag}")
+    print(f"  tree:    {result.tree}")
+    print(f"  remote:  {result.remote}")
+    print()
+    print("Next step — repoint a live Pattern CR at this version (not done automatically):")
+    print(f"  {result.oc_patch_cmd}")
+    if result.parent_tag:
+        print()
+        print("Roll back / diff any time:")
+        print(f"  git diff {result.parent_tag} {result.tag}")
 
 
 def cmd_batch(args):
