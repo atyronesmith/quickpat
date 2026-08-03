@@ -6,10 +6,11 @@ QuickPat converts Red Hat AI Quickstarts into Validated Patterns — GitOps-driv
 
 ## Architecture
 
-- **CLI entry point:** `quickpat/cli.py` — subcommands: `list`, `analyze`, `create`, `compose`, `update`, `validate`, `new`, `batch`, `check-ready`
+- **CLI entry point:** `quickpat/cli.py` — subcommands: `list`, `analyze`, `create`, `compose`, `publish-vp`, `update`, `validate`, `new`, `batch`, `check-ready`
 - **Pipeline:** `quickpat/pipeline.py` — top-level orchestration for both the `create` path (analyze → generate → validate) and the `compose` path (`compose_from_spec`, `compose_qs_from_spec`)
 - **Analyzer:** `quickpat/analyzer.py` — parses Helm charts, detects operators/secrets/GPU/features
 - **Generator:** `quickpat/generator.py` — emits VP directory structure (values-global, values-prod, infra charts, ExternalSecrets, overrides, Makefile, pattern.sh)
+- **Publish:** `quickpat/publish.py` — `publish_vp()` publishes a repo's already-committed `vp-out/` tree to an immutable `vp-v{N}` tag whose tree sits at the tag's own root. Exists because the Validated Patterns Operator's `Pattern` CRD has no subdirectory-path field — it always clones the whole repo and expects `values-global.yaml`/`values-prod.yaml`/`Makefile`/`pattern.sh`/`charts/` at the repo root, which breaks any layout (like the one-repo-both-paths model) that nests `vp-out/` under something else. Uses `git commit-tree` directly on `HEAD:vp-out` (no worktree, no subtree, correct `.gitignore` handling for free), chains each tag's commit to the previous one for free diffing, and derives the next version from the remote's existing tags rather than local state. Repointing a live `Pattern` CR at a new tag is deliberately left as a printed suggestion, never executed automatically.
 - **Validator:** `quickpat/validator.py` — structural checks + Patternizer conformance checks + auto-fix loop
 - **Compose package:** `quickpat/compose/` — ApplicationSpec authoring path:
   - `parser.py` — loads and validates `ApplicationSpec` YAML into typed dataclasses

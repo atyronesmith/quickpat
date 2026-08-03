@@ -94,6 +94,44 @@ Compile an `ApplicationSpec` into a VP or QS Helm chart.
 | `--no-fix` | Skip auto-fix validation pass (VP only) |
 | `--create-service-account` / `--no-create-service-account` | Generate RBAC for ODF setup Job (default: true) |
 
+### `quickpat publish-vp [vp-out-dir]`
+
+Publish a committed `vp-out/` tree to an immutable, versioned tag (`vp-v1`, `vp-v2`, ...)
+whose content sits at the tag's own root. Required for the VP path's ongoing GitOps
+reconciliation to work: the Validated Patterns Operator's `Pattern` CRD has no field for a
+subdirectory path — it always clones the whole repo and expects `values-global.yaml`,
+`values-prod.yaml`, `Makefile`, `pattern.sh`, and `charts/` at the repo root. Any repo
+layout that nests `vp-out/` under something else (e.g. alongside `qs-out/`, `spec.yaml`,
+`docs/`) will pass a local `./pattern.sh make install` but fail a live `Pattern` CR's
+reconciliation with `required values file not found: values-prod.yaml` until its content
+is published this way.
+
+```bash
+# commit vp-out/ first — publish-vp refuses a dirty tree by default
+quickpat publish-vp                      # defaults to ./vp-out
+quickpat publish-vp --dry-run            # preview the next tag without writing anything
+```
+
+| Option | Description |
+|--------|-------------|
+| `vp_out_dir` (positional) | Path to the vp-out directory (default: `vp-out`) |
+| `--remote NAME` | Git remote to query/push (default: `origin`) |
+| `--repo-url URL` | Override remote URL instead of resolving `--remote` |
+| `--tag-prefix PREFIX` | Version tag prefix (default: `vp-v`) |
+| `-m, --message MSG` | Commit/tag message override |
+| `--pattern-name NAME` | Pattern name for the printed `oc patch` hint (default: from `pattern-metadata.yaml`) |
+| `--namespace NS` | Namespace for the `oc patch` hint (default: `patterns-operator`) |
+| `--allow-dirty` | Publish on-disk content even with uncommitted changes |
+| `--dry-run` | Show what would be published without creating or pushing anything |
+
+Each publish is tagged `vp-v{N}`, with `N` derived from the remote's existing tags (never
+stored locally, since `pattern-metadata.yaml` is regenerated every `compose` run) and
+chained to the previous tag's commit — so any two published versions can be diffed
+directly (`git diff vp-v3 vp-v7`) and a live environment's `Pattern` CR can stay pinned to
+a known-good version until someone deliberately repoints it. An unchanged republish is a
+no-op. Repointing a live `Pattern` CR is intentionally **not** automated — the command
+only prints the `oc patch` command to run.
+
 ### `quickpat analyze <path>`
 
 Analyze a quickstart — detect operators, dependencies, secrets, features.

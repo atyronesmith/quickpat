@@ -9,6 +9,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `quickpat publish-vp [vp-out-dir]` — publishes a committed `vp-out/` tree to an
+  immutable, versioned tag (`vp-v1`, `vp-v2`, ...) whose content sits at the tag's
+  own root. Fixes a real deployment blocker found live-testing the VP path on an
+  actual cluster: the Validated Patterns Operator's `Pattern` CRD has no
+  subdirectory-path field, so any repo layout that nests `vp-out/` (e.g. the
+  one-repo-both-paths model, alongside `qs-out/`/`spec.yaml`/`docs/`) fails a live
+  `Pattern` CR's GitOps reconciliation with `required values file not found:
+  values-prod.yaml`, even though the one-time local `./pattern.sh make install`
+  succeeds. Uses `git commit-tree` directly on the already-committed `HEAD:vp-out`
+  tree (no worktree, no subtree, `.gitignore`-correct for free), chains each tag
+  to the previous one for free `git diff vp-v3 vp-v7`, and derives the next
+  version from the remote's existing tags rather than local state. Repointing a
+  live `Pattern` CR is intentionally not automated — only an `oc patch` command
+  is printed. 13 new tests.
 - `quickpat init-ci spec.yaml [--output-dir DIR] [--force]` — installs the
   hardened CI workflow into any spec repo. Reads the pattern name from spec.yaml,
   substitutes it into the template, and writes `.github/workflows/compose.yml`.
@@ -80,6 +94,27 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - `cert-manager` and `jobset` added to the operator registry
 
 ### Fixed
+- VP-path `values-secret.yaml.template` generation (`_generate_vp_v2_secret_template`)
+  never set `onMissingValue` on any field, always emitting `value: ''`. The real VP
+  secrets loader defaults a missing `onMissingValue` to `error`, which fails
+  validation outright on any empty value — breaking every optional secret on
+  every VP-format pattern with more than one top-level secret. Found and fixed
+  live-testing a real `pattern.sh make install` (`onMissingValue: generate` now
+  maps through with a `vaultPolicy` and no `value` key; `skip` and the default
+  `prompt` both map to `prompt` with an empty default, since the VP loader has
+  no `skip` concept).
+- Every generated ArgoCD `Application` set `project: <clusterGroupName>` (e.g.
+  `project: prod`), but the generator never emitted the matching
+  `clusterGroup.argoProjects` entry the framework's `clustergroup` chart
+  actually requires to create that `AppProject` — so `project:` always pointed
+  at a project that doesn't exist, and ArgoCD refused to sync with
+  `Application referencing project prod which does not exist`. 100% systemic:
+  every VP-format pattern this generator has ever produced has set this
+  dangling reference, caught only now because no output had been run through
+  real ArgoCD reconciliation before. Fix: application entries no longer set
+  `project:` at all, matching a known-working hand-crafted reference pattern —
+  the `clustergroup` chart's own template falls back to the pre-existing
+  `default` ArgoCD project, which has identical permissive resource whitelists.
 - `vp-out/.gitignore` pattern `values-secret*` was too broad — excluded
   `values-secret.yaml.template` (safe to commit) in addition to
   `values-secret.yaml` (real secrets, must stay ignored). Changed to
