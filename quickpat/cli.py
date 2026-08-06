@@ -12,7 +12,7 @@ from .config import get as cfg
 from .generator import build_report
 from .providers import make_provider
 from .operators import OPERATORS
-from .pipeline import transform, transform_remote, skill_analyze, create_from_spec, compose_from_spec, compose_qs_from_spec, TransformResult
+from .pipeline import transform, transform_remote, skill_analyze, compose_from_spec, compose_qs_from_spec, TransformResult
 from .profile import load_profile
 from .readiness import check_readiness
 from .registry import (
@@ -92,18 +92,6 @@ def main():
     transform_p.add_argument(
         '--dry-run', action='store_true',
         help='Show what would be changed without writing',
-    )
-
-    # new subcommand
-    new_p = subparsers.add_parser(
-        'new', help='Create a Validated Pattern from a spec YAML file'
-    )
-    new_p.add_argument('spec', help='Path to spec YAML file')
-    new_p.add_argument('--output', '-o', help='Output directory')
-    new_p.add_argument('--name', help='Pattern name override')
-    new_p.add_argument(
-        '--non-interactive', action='store_true',
-        help='Use defaults, skip interactive prompts',
     )
 
     # compose subcommand
@@ -273,8 +261,6 @@ def main():
         cmd_analyze(args)
     elif args.command == 'create':
         cmd_create(args)
-    elif args.command == 'new':
-        cmd_new(args)
     elif args.command == 'batch':
         cmd_batch(args)
     elif args.command == 'update':
@@ -464,28 +450,6 @@ def cmd_create(args):
                 extra_config=extra or None,
             )
             print_results(result.config or config)
-
-
-def cmd_new(args):
-    """Create a Validated Pattern from a spec YAML file."""
-    print("=== QuickPat: Create Pattern from Spec ===\n")
-
-    output_dir = args.output or str(
-        Path(args.patterns_dir) / (args.name or 'new-pattern')
-    )
-
-    result = create_from_spec(
-        spec_path=args.spec,
-        output_dir=output_dir,
-        pattern_name=args.name,
-    )
-
-    if result.success:
-        _print_transform_result(result)
-    else:
-        for w in result.warnings:
-            print(f"Error: {w}", file=sys.stderr)
-        sys.exit(1)
 
 
 def _parse_target_arg(target_str):

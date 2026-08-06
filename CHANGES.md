@@ -8,6 +8,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Removed
+- `quickpat new spec.yaml` and the legacy flat-spec format (`quickpat/spec.py`,
+  `create_from_spec`). It was a second, incompatible spec schema alongside
+  `compose`'s `ApplicationSpec`, undocumented and unmaintained since `compose`
+  became the primary path — quarantining it risked confusing new users about
+  which format to write. `analyzer.py` (used by `create`/`transform`/`update`)
+  is untouched; only the flat-spec-to-VP path is gone. Use `quickpat compose`.
+- `skills/` directory (`transform_quickstart.md` + its README). A third,
+  uncoordinated way to produce a pattern from a quickstart — a natural-language
+  prompt telling an LLM to freehand-convert a quickstart by reading conventions,
+  rather than running the deterministic `compose` compiler over a validated
+  spec. Fully orphaned: nothing in the repo imported or referenced it, and its
+  own README documented a `skills/transform_quickstart.py` module that never
+  existed.
+
 ### Added
 - `quickpat publish-vp [vp-out-dir]` — publishes a committed `vp-out/` tree to an
   immutable, versioned tag (`vp-v1`, `vp-v2`, ...) whose content sits at the tag's
