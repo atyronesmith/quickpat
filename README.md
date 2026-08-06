@@ -307,7 +307,8 @@ my-app/
 │   │   ├── values-AWS.yaml       ← storage provider hints per platform
 │   │   ├── values-gpu.yaml       ← GPU operators (when devices declared)
 │   │   ├── values-cpu.yaml
-│   │   └── <app-name>.yaml       ← upstream.extraValues
+│   │   └── <app-name>.yaml       ← upstream.extraValues or custom.extraValues /
+│   │                               copied from source overrides/ via extraValueFiles
 │   ├── Makefile, Makefile-common, pattern.sh, pattern-metadata.yaml
 │   └── ansible.cfg, .gitignore, LICENSE
 └── qs-out/                       ← generated QS Helm chart (helm install target, committed)

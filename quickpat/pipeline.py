@@ -187,6 +187,8 @@ def skill_generate(analysis: QuickstartAnalysis, config: dict) -> str:
     """Generate pattern files from analysis + config. Pure deterministic."""
     generator = PatternGenerator(analysis, config)
     generator.generate()
+    # Surface non-fatal generator messages (e.g. missing override stubs)
+    config['_generator_warnings'] = list(generator.warnings)
     return config["output_dir"]
 
 
@@ -372,6 +374,9 @@ def compose_from_spec(
     result.success = True
     result.files_created = files_written
     result.files_unchanged = files_unchanged
+
+    for w in tmp_config.get('_generator_warnings', []):
+        result.warnings.append(w)
 
     for issue in val_result.issues:
         if not issue.fix_applied:

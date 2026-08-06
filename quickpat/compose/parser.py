@@ -97,6 +97,9 @@ class CustomComponent:
     namespace: str = ''
     source_chart: str = ''        # source.chart path (local), if declared
     extra_value_files: list = field(default_factory=list)
+    # Inline values → overrides/<name>.yaml (parity with upstream.extraValues).
+    # When set, /overrides/<name>.yaml is auto-added to extraValueFiles.
+    extra_values: dict = field(default_factory=dict)
     # 'argocd' (default) — creates an ArgoCD app in values-prod.yaml
     # 'manual'           — chart is in the repo but NOT managed by ArgoCD
     #                      (use for one-time build steps, pre-flight jobs, etc.)
@@ -267,6 +270,7 @@ def _parse_custom(raw: dict) -> dict:
             namespace=comp_raw.get('namespace') or '',
             source_chart=source_chart,
             extra_value_files=comp_raw.get('extraValueFiles') or [],
+            extra_values=comp_raw.get('extraValues') or {},
             deploy=deploy,
             replicas=comp_raw.get('replicas') or 1,
             ports=comp_raw.get('ports') or [],

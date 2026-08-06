@@ -166,7 +166,15 @@ Common output references:
 custom:
   <component-name>:
     source:
-      image: <image-ref>           # required
+      image: <image-ref>           # OR source.chart: charts/<name>
+      chart: charts/<name>         # local chart copied into vp-out/charts/
+    namespace: <string>             # optional — ArgoCD app namespace (default: pattern name)
+    extraValueFiles:               # optional — ArgoCD extraValueFiles paths
+      - /overrides/<name>.yaml
+    extraValues:                   # optional — inline values → overrides/<name>.yaml
+      key: value                   #   (parity with upstream.extraValues; auto-adds
+                                   #    /overrides/<name>.yaml to extraValueFiles)
+    deploy: argocd                 # optional — argocd (default) | manual
     replicas: 1                    # optional, default: 1
     ports:
       - name: http
@@ -195,6 +203,8 @@ custom:
 ```
 
 Custom components are copied from `charts/<component-name>/` in the application repo if they exist. The `source.image` and fields above are used to generate the chart when it doesn't exist yet.
+
+**Override files:** when `extraValueFiles` lists `/overrides/<file>.yaml`, compose copies `<spec_dir>/overrides/<file>.yaml` into `vp-out/overrides/` (same source-layer model as `charts/`). If the source file is missing and `extraValues` is unset, a documented stub is written so the ArgoCD reference always resolves. When both `extraValues` and a source file exist for the same path, `extraValues` wins.
 
 ---
 

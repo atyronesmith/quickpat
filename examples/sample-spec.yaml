@@ -315,6 +315,10 @@ custom:
     namespace: my-app               # namespace for the ArgoCD app (default: pattern name)
     extraValueFiles:                # additional values files for this ArgoCD app
       - /overrides/my-app-backend.yaml
+    # Source file lives at overrides/my-app-backend.yaml (next to spec.yaml)
+    # and is copied into vp-out/overrides/ on every compose — same model as charts/.
+    # Alternatively, set extraValues: inline (parity with upstream.extraValues)
+    # and compose will write overrides/my-app-backend.yaml from the map.
 
   build-images:
     description: In-cluster image build pipeline (one-time)

@@ -234,6 +234,8 @@ custom:
 
 The FastAPI app, chunker, language detector, and Shiny dashboard are unique to lemonade-stand — there's no reason to build block abstractions for them. The boundary rule: if a component appears in 3+ quickstarts, it should be a block; if it's unique to this application, it's custom.
 
+For hand-written charts that need ArgoCD value overrides, declare `extraValueFiles: [/overrides/<name>.yaml]` and keep the values in `<spec_dir>/overrides/<name>.yaml` (copied into `vp-out/overrides/` on every compose, same model as `charts/`). Or set `extraValues:` inline on the custom component (parity with `upstream.extraValues`).
+
 ---
 
 ## Running compose
