@@ -822,6 +822,44 @@ class TestExternalSecretStripping:
         assert not (dst / 'all_es.yaml').exists()
 
 
+class TestSpecValidationOnQSPath:
+    """compose_qs_from_spec must run the same spec-level validation gate as
+    compose_from_spec (VP path) — regression test for the QS path silently
+    skipping validate_spec and compiling invalid specs."""
+
+    INVALID_WIRING_SPEC = """\
+apiVersion: supplychain/v1alpha1
+kind: ApplicationSpec
+metadata:
+  name: qs-invalid-wiring
+  tier: sandbox
+  upstream:
+    repo: https://github.com/example/qs.git
+blocks:
+  platform:
+    type: ai-platform-foundation
+    config:
+      dsc:
+        kserve: Managed
+        trustyai: Managed
+wiring:
+  - from: platform
+    to: does-not-exist
+custom: {}
+"""
+
+    def test_invalid_wiring_reference_aborts_qs_compose(self, tmp_path):
+        spec_file = tmp_path / 'spec.yaml'
+        spec_file.write_text(self.INVALID_WIRING_SPEC)
+        out_dir = tmp_path / 'qs-out'
+
+        result = compose_qs_from_spec(str(spec_file), output_dir=str(out_dir))
+
+        assert not result.success
+        assert any('spec:error' in w for w in result.warnings)
+        assert not out_dir.exists()
+
+
 def test_secret_value_key_normalises_snake_and_kebab():
     from quickpat.compose.qs_generator import _secret_value_key
     assert _secret_value_key('gemini', 'api_key') == 'geminiApiKey'

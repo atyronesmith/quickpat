@@ -8,6 +8,14 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- `compose_qs_from_spec` (`--format qs`) never ran `validate_spec` before
+  compiling — the VP path (`compose_from_spec`) has always aborted on
+  error-severity spec issues (bad wiring refs, unknown block types, duplicate
+  secret names, etc.), but the QS path compiled invalid specs anyway. Added
+  the same validation gate ahead of `compile_spec` in `compose_qs_from_spec`.
+  Regression test: `TestSpecValidationOnQSPath` in `tests/test_compose_qs.py`.
+
 ### Removed
 - `quickpat new spec.yaml` and the legacy flat-spec format (`quickpat/spec.py`,
   `create_from_spec`). It was a second, incompatible spec schema alongside

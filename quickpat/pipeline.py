@@ -450,6 +450,16 @@ def compose_qs_from_spec(
     if pattern_name:
         spec.name = pattern_name
 
+    # Spec-level semantic validation — runs before generation.
+    # Error-severity issues abort; warnings are surfaced but do not block.
+    from .compose.spec_validator import validate_spec as _validate_spec
+    spec_val = _validate_spec(spec, spec_dir=spec_dir)
+    for issue in spec_val.issues:
+        prefix = '[spec:error]' if issue.severity == 'error' else '[spec:warning]'
+        result.warnings.append(f"{prefix} {issue.file}: {issue.message}")
+    if not spec_val.valid:
+        return result  # success remains False
+
     try:
         _, config = compile_spec(
             spec, output_dir, spec_dir=spec_dir,
