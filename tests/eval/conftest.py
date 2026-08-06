@@ -119,7 +119,7 @@ def ensure_quickstart(name, url, no_cache=False):
         shutil.rmtree(dest)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     subprocess.run(
-        ["git", "clone", "--depth", "1", url, str(dest)],
+        ["git", "clone", "--depth", "1", "--recurse-submodules", url, str(dest)],
         check=True, capture_output=True,
     )
     return dest
@@ -143,6 +143,14 @@ def fetch_quickstarts(name_filter=None, no_cache=False):
             # Skip quickstarts that fail to clone
             print(f"Warning: failed to clone {name}: {e}", file=sys.stderr)
     return quickstarts
+
+
+# Quickstarts that ship no Helm chart at all (raw manifests/Tekton only) —
+# quickpat has no ingestion path for these yet. Tracked as a future feature,
+# not a regression; xfail keeps the eval suite green without hiding new breaks.
+NO_HELM_CHART = {
+    "agentic-software-factory": "raw OpenShift manifests + Tekton pipelines, no Chart.yaml",
+}
 
 
 # ── Dynamic parametrization ──────────────────────────────────────
@@ -178,7 +186,15 @@ def pytest_generate_tests(metafunc):
     ids = []
     for qs_name, qs_path in quickstarts:
         for prov_name, model, llm_fn in providers:
-            argvalues.append((qs_name, qs_path, prov_name, model, llm_fn))
+            values = (qs_name, qs_path, prov_name, model, llm_fn)
+            if qs_name in NO_HELM_CHART:
+                values = pytest.param(
+                    *values,
+                    marks=pytest.mark.xfail(
+                        reason=NO_HELM_CHART[qs_name], strict=True,
+                    ),
+                )
+            argvalues.append(values)
             ids.append(f"{qs_name}-{prov_name}")
 
     metafunc.parametrize(argnames, argvalues, ids=ids)
