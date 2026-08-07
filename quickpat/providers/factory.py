@@ -2,6 +2,13 @@ from __future__ import annotations
 
 from .base import Provider
 
+_PROVIDER_EXTRAS: dict[str, str] = {
+    "openai": "openai",
+    "anthropic": "anthropic",
+    "deepinfra": "deepinfra",
+    "vllm": "vllm",
+}
+
 
 def make_provider(config: dict) -> Provider | None:
     """Build a provider from a config dict.
@@ -15,20 +22,32 @@ def make_provider(config: dict) -> Provider | None:
 
     model = config.get("model")
 
-    if provider_name == "openai":
-        from .openai_provider import OpenAIProvider
-        return OpenAIProvider(model=model, api_key=config.get("api_key"))
-    elif provider_name == "anthropic":
-        from .anthropic import AnthropicProvider
-        return AnthropicProvider(model=model, api_key=config.get("api_key"))
-    elif provider_name == "ollama":
-        from .ollama import OllamaProvider
-        return OllamaProvider(model=model, base_url=config.get("base_url"))
-    elif provider_name == "vllm":
-        from .vllm import VLLMProvider
-        return VLLMProvider(model=model, base_url=config.get("base_url"))
-    elif provider_name == "deepinfra":
-        from .deepinfra import DeepInfraProvider
-        return DeepInfraProvider(model=model, api_key=config.get("api_key"))
-
-    raise ValueError(f"Unknown LLM provider: {provider_name}")
+    try:
+        if provider_name == "openai":
+            from .openai_provider import OpenAIProvider
+            return OpenAIProvider(model=model, api_key=config.get("api_key"))
+        elif provider_name == "anthropic":
+            from .anthropic import AnthropicProvider
+            return AnthropicProvider(
+                model=model,
+                api_key=config.get("api_key"),
+                max_tokens=config.get("max_tokens"),
+            )
+        elif provider_name == "ollama":
+            from .ollama import OllamaProvider
+            return OllamaProvider(model=model, base_url=config.get("base_url"))
+        elif provider_name == "vllm":
+            from .vllm import VLLMProvider
+            return VLLMProvider(model=model, base_url=config.get("base_url"))
+        elif provider_name == "deepinfra":
+            from .deepinfra import DeepInfraProvider
+            return DeepInfraProvider(model=model, api_key=config.get("api_key"))
+        else:
+            raise ValueError(f"Unknown LLM provider: {provider_name}")
+    except ImportError as exc:
+        extra = _PROVIDER_EXTRAS.get(provider_name, provider_name)
+        raise ImportError(
+            f"LLM provider '{provider_name}' requires an optional dependency. "
+            f"Install with: pip install 'quickpat[{extra}]' "
+            f"(or pip install 'quickpat[llm]'). Original error: {exc}"
+        ) from exc
