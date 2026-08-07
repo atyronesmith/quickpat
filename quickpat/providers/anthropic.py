@@ -9,17 +9,24 @@ from ..config import get as cfg
 
 class AnthropicProvider:
 
-    def __init__(self, model: str | None = None, api_key: str | None = None):
+    def __init__(
+        self,
+        model: str | None = None,
+        api_key: str | None = None,
+        max_tokens: int | None = None,
+    ):
         import anthropic
         self.model = model or cfg("llm.anthropic.model", "claude-sonnet-4-20250514")
+        self.max_tokens = max_tokens or cfg("llm.anthropic.max_tokens", 4096)
         key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         self._client = anthropic.Anthropic(api_key=key)
 
     def complete(self, system: str, prompt: str, **kwargs) -> LLMResponse:
         response_schema = kwargs.get("response_schema")
+        max_tokens = kwargs.get("max_tokens", self.max_tokens)
         req = {
             "model": self.model,
-            "max_tokens": 1024,
+            "max_tokens": max_tokens,
             "system": system,
             "messages": [{"role": "user", "content": prompt}],
         }
