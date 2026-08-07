@@ -8,14 +8,19 @@ import yaml
 from .config import get as cfg
 
 
-def fetch_registry(url: str = None) -> list:
+def fetch_registry(url: str | None = None) -> list:
     """Fetch and parse the .gitmodules file from ai-quickstart-pub.
 
     Returns a list of dicts with 'name' and 'url' keys.
     """
     if url is None:
-        url = cfg("registry.quickstart_url")
+        configured = cfg("registry.quickstart_url")
+        if not isinstance(configured, str):
+            raise RuntimeError("Failed to fetch registry: registry.quickstart_url not configured")
+        url = configured
     timeout = cfg("registry.timeout", 10)
+    if not isinstance(timeout, (int, float)):
+        timeout = 10
     try:
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -56,7 +61,7 @@ def _parse_gitmodules(content: str) -> list:
     return entries
 
 
-def resolve_name(name: str, registry: list = None) -> str:
+def resolve_name(name: str, registry: list | None = None) -> str:
     """Resolve a quickstart name to a clone URL.
 
     Tries exact match first, then case-insensitive, then substring.
@@ -95,14 +100,19 @@ def resolve_name(name: str, registry: list = None) -> str:
 # ── Shared chart index ───────────────────────────────────────────
 
 
-def fetch_chart_index(url: str = None) -> dict:
+def fetch_chart_index(url: str | None = None) -> dict:
     """Fetch the ai-architecture-charts Helm repo index.
 
     Returns a dict mapping chart name to latest version string.
     """
     if url is None:
-        url = cfg("registry.chart_repo_index_url")
+        configured = cfg("registry.chart_repo_index_url")
+        if not isinstance(configured, str):
+            raise RuntimeError("Failed to fetch chart index: registry.chart_repo_index_url not configured")
+        url = configured
     timeout = cfg("registry.timeout", 10)
+    if not isinstance(timeout, (int, float)):
+        timeout = 10
     try:
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -117,7 +127,7 @@ def fetch_chart_index(url: str = None) -> dict:
     return latest
 
 
-def check_dependency_freshness(dependencies, chart_index=None):
+def check_dependency_freshness(dependencies: list, chart_index: dict | None = None) -> list:
     """Compare dependency versions against the shared chart repo.
 
     Args:
@@ -147,7 +157,7 @@ def check_dependency_freshness(dependencies, chart_index=None):
     return stale
 
 
-def detect_local_forks(charts, chart_index=None):
+def detect_local_forks(charts: list, chart_index: dict | None = None) -> list:
     """Detect local charts that duplicate a shared chart from ai-architecture-charts.
 
     Args:

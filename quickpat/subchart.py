@@ -50,7 +50,7 @@ class SubChartInfo:
 
 
 def fetch_subchart(name: str, version: str, repo_url: str,
-                   cache_dir: str = None) -> Path | None:
+                   cache_dir: str | None = None) -> Path | None:
     """Download a sub-chart archive and extract to cache directory.
 
     Returns the extracted chart directory, or None on failure.
@@ -72,6 +72,8 @@ def fetch_subchart(name: str, version: str, repo_url: str,
     try:
         req = urllib.request.Request(archive_url)
         timeout = cfg("registry.timeout", 10)
+        if not isinstance(timeout, (int, float)):
+            timeout = 10
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = resp.read()
     except Exception:
@@ -93,6 +95,8 @@ def _resolve_archive_url(name: str, version: str, repo_url: str) -> str:
     try:
         req = urllib.request.Request(index_url)
         timeout = cfg("registry.timeout", 10)
+        if not isinstance(timeout, (int, float)):
+            timeout = 10
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             index = yaml.safe_load(resp.read())
     except Exception:
@@ -167,7 +171,7 @@ def analyze_subchart(chart_path: Path) -> SubChartInfo:
 
 def fetch_and_analyze_subcharts(
     dependencies: list,
-    cache_dir: str = None,
+    cache_dir: str | None = None,
 ) -> dict:
     """Fetch and analyze all sub-chart dependencies.
 
@@ -213,7 +217,7 @@ def _find_chart_dir(path: Path) -> Path | None:
     return None
 
 
-def _detect_secret_gates(values: dict, templates_dir: Path = None) -> list:
+def _detect_secret_gates(values: dict, templates_dir: Path | None = None) -> list:
     """Find secret creation gates in values.yaml.
 
     Looks for patterns like:

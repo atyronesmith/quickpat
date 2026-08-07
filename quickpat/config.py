@@ -5,6 +5,7 @@ Loads settings from quickpat.yaml (project root) or
 """
 
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -95,7 +96,7 @@ def get_config():
     return _config
 
 
-def get(key_path, default=None):
+def get(key_path: str, default: Any = None) -> Any:
     """Get a config value by dot-separated path.
 
     Example: get('llm.openai.model') -> 'gpt-4o-mini'
