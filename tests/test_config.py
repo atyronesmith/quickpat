@@ -34,6 +34,7 @@ class TestConfigFile:
         assert cfg["pattern"]["clustergroup_version"] == "1.0.*"
         # Defaults preserved
         assert cfg["llm"]["anthropic"]["model"] == "claude-sonnet-4-20250514"
+        assert cfg["llm"]["anthropic"]["max_tokens"] == 4096
         assert cfg["infrastructure"]["vault_chart_version"] == "0.1.*"
 
     def test_partial_override_merges_deeply(self, tmp_path):

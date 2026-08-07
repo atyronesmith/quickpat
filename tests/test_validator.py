@@ -316,7 +316,7 @@ def _make_valid_remote_pattern(path):
                     "openshift-external-secrets": {
                         "name": "openshift-external-secrets",
                         "namespace": "external-secrets", "project": "prod",
-                        "chart": "openshift-external-secrets", "chartVersion": "0.0.*",
+                        "chart": "openshift-external-secrets", "chartVersion": "0.2.*",
                     },
                     "rag-quickstart": {
                         "name": "rag-quickstart", "namespace": "rag", "project": "prod",

@@ -14,7 +14,7 @@ DEFAULTS = {
     "llm": {
         "provider": "none",
         "openai": {"model": "gpt-4o-mini"},
-        "anthropic": {"model": "claude-sonnet-4-20250514"},
+        "anthropic": {"model": "claude-sonnet-4-20250514", "max_tokens": 4096},
         "ollama": {"model": "llama3.1", "base_url": "http://localhost:11434"},
         "vllm": {"model": "default", "base_url": "http://localhost:8000"},
         "deepinfra": {"model": "Qwen/Qwen2.5-72B-Instruct"},
@@ -28,7 +28,7 @@ DEFAULTS = {
     },
     "infrastructure": {
         "vault_chart_version": "0.1.*",
-        "external_secrets_chart_version": "0.0.*",
+        "external_secrets_chart_version": "0.2.*",
     },
     "registry": {
         "quickstart_url": (
