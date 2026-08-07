@@ -281,7 +281,7 @@ def transform(
         val_result = validate(output_dir, config, llm)
 
     result.validation = val_result
-    result.success = True
+    result.success = val_result.valid
 
     # Collect warnings from validation
     for issue in val_result.issues:
@@ -366,11 +366,14 @@ def compose_from_spec(
         else:
             val_result = validate(str(tmp_out), tmp_config)
 
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
-        files_written, files_unchanged = _sync_dir(tmp_out, Path(output_dir))
+        if val_result.valid:
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+            files_written, files_unchanged = _sync_dir(tmp_out, Path(output_dir))
+        else:
+            files_written, files_unchanged = [], []
 
     result.validation = val_result
-    result.success = True
+    result.success = val_result.valid
     result.files_created = files_written
     result.files_unchanged = files_unchanged
 
@@ -503,6 +506,7 @@ def transform_remote(
     auto_fix: bool = True,
     max_fix_iterations: int = 3,
     extra_config: dict | None = None,
+    force: bool = False,
 ) -> TransformResult:
     """Remote strategy pipeline: analyze -> fetch sub-charts -> decide -> generate -> profile."""
     result = TransformResult(success=False)
@@ -542,13 +546,44 @@ def transform_remote(
             subchart_info=subchart_info,
             operators=list(analysis.detected_operators),
         )
-        profile_diff = diff_profile(existing_profile, new_fp)
+        # Detect secret-field drift the fingerprint alone can miss so update
+        # does not skip a stale pattern. Resource types are not passed here:
+        # drift_entries are usually empty (KNOWN_IGNORE_RULES is empty), so
+        # every kind would look "new" and defeat the unchanged skip.
+        detected_secrets = _default_classify_secrets(subchart_info)
+        profile_diff = diff_profile(
+            existing_profile, new_fp,
+            new_secrets=detected_secrets,
+        )
         result.llm_decisions.append(
             f"Profile diff: {profile_diff.change_level} — {profile_diff.summary}"
         )
 
+        if not force and profile_diff.unchanged:
+            result.warnings.append(
+                "No upstream changes detected; skipping regeneration "
+                "(use --force to regenerate anyway)"
+            )
+            if auto_fix:
+                val_result = validate_and_fix(
+                    output_dir, None, llm, max_iterations=max_fix_iterations,
+                )
+            else:
+                val_result = validate(output_dir, None, llm)
+            result.validation = val_result
+            result.success = val_result.valid
+            for issue in val_result.issues:
+                if not issue.fix_applied:
+                    result.warnings.append(
+                        f"[{issue.severity}] {issue.file}: {issue.message}"
+                    )
+            return result
+
         if profile_diff.change_level in ("low", "medium"):
+            # Reuse prior decisions but refresh the fingerprint so the next
+            # update can correctly detect "unchanged".
             profile = existing_profile
+            profile.source_fingerprint = new_fp
         else:
             profile = _rebuild_profile(
                 existing_profile, analysis, subchart_info, llm,
@@ -572,7 +607,13 @@ def transform_remote(
     # 7. Generate
     skill_generate(analysis, config)
 
-    # 8. Save profile
+    # 8. Update profile with user-provided overrides before saving
+    if extra_config:
+        if extra_config.get('git_repo_url'):
+            profile.source_repo_url = extra_config['git_repo_url']
+        if 'chart_path_in_repo' in extra_config:
+            profile.source_chart_path = extra_config['chart_path_in_repo']
+
     save_profile(output_dir, profile)
 
     # 9. Validate
@@ -584,7 +625,7 @@ def transform_remote(
         val_result = validate(output_dir, config, llm)
 
     result.validation = val_result
-    result.success = True
+    result.success = val_result.valid
 
     for issue in val_result.issues:
         if not issue.fix_applied:
@@ -606,11 +647,14 @@ def _build_new_profile(
 
     # Classify secrets
     if llm and subchart_info:
-        secrets = _llm_classify_secrets(llm, analysis, subchart_info)
+        secrets, llm_warning = _llm_classify_secrets(llm, analysis, subchart_info)
         profile.secret_decisions = secrets
-        result.llm_decisions.append(
-            f"Classified {len(secrets)} secrets via LLM"
-        )
+        if llm_warning:
+            result.warnings.append(llm_warning)
+        else:
+            result.llm_decisions.append(
+                f"Classified {len(secrets)} secrets via LLM"
+            )
     else:
         profile.secret_decisions = _default_classify_secrets(subchart_info)
 
@@ -813,8 +857,13 @@ def _llm_classify_secrets(
     llm: Provider,
     analysis: QuickstartAnalysis,
     subchart_info: dict,
-) -> list:
-    """Ask LLM to classify each secret field."""
+) -> tuple[list, str | None]:
+    """Ask LLM to classify each secret field.
+
+    Returns (decisions, warning_or_none).  When the LLM call fails the
+    fallback is heuristic classification and warning_or_none carries the
+    reason string so callers can surface it.
+    """
     fields_desc = []
     for sc_name, sc_info in subchart_info.items():
         for field_name in sc_info.secret_fields:
@@ -847,11 +896,13 @@ def _llm_classify_secrets(
                     default_value=s.get('default_value', ''),
                 )
                 for s in result.get('secrets', [])
-            ]
-    except Exception:
-        pass
+            ], None
+    except Exception as e:
+        return _default_classify_secrets(subchart_info), (
+            f"LLM secret classification failed ({e}); using heuristic defaults"
+        )
 
-    return _default_classify_secrets(subchart_info)
+    return _default_classify_secrets(subchart_info), None
 
 
 def _list_created_files(output_dir: str, config: dict) -> list:

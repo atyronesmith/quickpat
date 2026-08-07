@@ -6,6 +6,8 @@ from pathlib import Path
 from quickpat.analyzer import QuickstartAnalysis, ChartInfo, ChartDependency
 from quickpat.pipeline import (
     _default_classify_secrets,
+    _llm_classify_secrets,
+    _build_new_profile,
     _profile_to_config,
     _static_drift_entries,
     KNOWN_IGNORE_RULES,
@@ -255,6 +257,73 @@ class TestTransformRemote:
         assert r2.success is True
         assert any("Profile diff" in d for d in r2.llm_decisions)
 
+    def test_skips_regeneration_when_upstream_unchanged(self, tmp_path):
+        qs = tmp_path / 'qs'
+        chart_dir = qs / 'deploy' / 'helm' / 'myapp'
+        write_chart(chart_dir, 'myapp', '1.0.0', dependencies=[
+            {'name': 'pgvector', 'version': '0.5.0',
+             'repository': 'https://rh-ai-quickstart.github.io/ai-architecture-charts'},
+        ])
+        write_values(chart_dir, {'myapp': {'password': 'changeme'}})
+
+        out = str(tmp_path / 'output')
+        transform_remote(str(qs), output_dir=out, pattern_name='test-pattern')
+
+        r2 = transform_remote(str(qs), output_dir=out, pattern_name='test-pattern')
+        assert r2.success is True
+        assert any('skipping regeneration' in w.lower() for w in r2.warnings)
+
+    def test_force_regenerates_when_upstream_unchanged(self, tmp_path):
+        qs = tmp_path / 'qs'
+        chart_dir = qs / 'deploy' / 'helm' / 'myapp'
+        write_chart(chart_dir, 'myapp', '1.0.0', dependencies=[
+            {'name': 'pgvector', 'version': '0.5.0',
+             'repository': 'https://rh-ai-quickstart.github.io/ai-architecture-charts'},
+        ])
+        write_values(chart_dir, {'myapp': {'password': 'changeme'}})
+
+        out = str(tmp_path / 'output')
+        transform_remote(str(qs), output_dir=out, pattern_name='test-pattern')
+
+        r2 = transform_remote(
+            str(qs), output_dir=out, pattern_name='test-pattern', force=True,
+        )
+        assert r2.success is True
+        assert not any('skipping regeneration' in w.lower() for w in r2.warnings)
+        assert (Path(out) / 'values-prod.yaml').exists()
+
+    def test_values_yaml_change_does_not_skip(self, tmp_path):
+        qs = tmp_path / 'qs'
+        chart_dir = qs / 'deploy' / 'helm' / 'myapp'
+        write_chart(chart_dir, 'myapp', '1.0.0')
+        write_values(chart_dir, {'myapp': {'password': 'changeme'}})
+
+        out = str(tmp_path / 'output')
+        transform_remote(str(qs), output_dir=out, pattern_name='test-pattern')
+
+        write_values(chart_dir, {'myapp': {'password': 'changed', 'replicas': 2}})
+        r2 = transform_remote(str(qs), output_dir=out, pattern_name='test-pattern')
+        assert r2.success is True
+        assert not any('skipping regeneration' in w.lower() for w in r2.warnings)
+        assert any('values.yaml' in d for d in r2.llm_decisions)
+
+    def test_values_yaml_change_then_unchanged_skips(self, tmp_path):
+        """After regenerating for a values change, fingerprint updates so next run skips."""
+        qs = tmp_path / 'qs'
+        chart_dir = qs / 'deploy' / 'helm' / 'myapp'
+        write_chart(chart_dir, 'myapp', '1.0.0')
+        write_values(chart_dir, {'myapp': {'password': 'v1'}})
+
+        out = str(tmp_path / 'output')
+        transform_remote(str(qs), output_dir=out, pattern_name='test-pattern')
+
+        write_values(chart_dir, {'myapp': {'password': 'v2'}})
+        r2 = transform_remote(str(qs), output_dir=out, pattern_name='test-pattern')
+        assert not any('skipping regeneration' in w.lower() for w in r2.warnings)
+
+        r3 = transform_remote(str(qs), output_dir=out, pattern_name='test-pattern')
+        assert any('skipping regeneration' in w.lower() for w in r3.warnings)
+
 
 # ── Static Drift Entries ─────────────────────────────────────────────
 
@@ -281,3 +350,128 @@ class TestStaticDriftEntries:
 
     def test_empty_input(self):
         assert _static_drift_entries([]) == []
+
+
+# ── Validation success semantics ─────────────────────────────────────
+
+
+class TestPipelineValidationSuccess:
+    """Pipeline success reflects post-generation validation."""
+
+    def test_transform_success_false_when_validation_fails(
+        self, single_chart_quickstart, tmp_path, monkeypatch,
+    ):
+        from quickpat.pipeline import transform
+        from quickpat.validator import ValidationResult, Issue
+
+        def fake_validate_and_fix(*args, **kwargs):
+            return ValidationResult(valid=False, issues=[
+                Issue('values-global.yaml', 'error', 'forced validation failure'),
+            ])
+
+        monkeypatch.setattr(
+            'quickpat.pipeline.validate_and_fix', fake_validate_and_fix,
+        )
+
+        result = transform(
+            str(single_chart_quickstart),
+            output_dir=str(tmp_path / 'out'),
+            chart_strategy='local',
+        )
+        assert result.validation is not None
+        assert not result.validation.valid
+        assert not result.success
+
+    def test_transform_remote_success_false_when_validation_fails(
+        self, tmp_path, monkeypatch,
+    ):
+        from quickpat.validator import ValidationResult, Issue
+
+        qs = tmp_path / 'qs'
+        chart_dir = qs / 'deploy' / 'helm' / 'myapp'
+        write_chart(chart_dir, 'myapp', '1.0.0')
+        write_values(chart_dir, {'myapp': {'password': 'changeme'}})
+
+        def fake_validate_and_fix(*args, **kwargs):
+            return ValidationResult(valid=False, issues=[
+                Issue('values-global.yaml', 'error', 'forced validation failure'),
+            ])
+
+        monkeypatch.setattr(
+            'quickpat.pipeline.validate_and_fix', fake_validate_and_fix,
+        )
+
+        result = transform_remote(
+            str(qs), output_dir=str(tmp_path / 'out'), pattern_name='test-pattern',
+        )
+        assert result.validation is not None
+        assert not result.validation.valid
+        assert not result.success
+
+
+# ── LLM classify fallback warning ────────────────────────────────────
+
+
+class TestLLMClassifySecretsWarning:
+    """_llm_classify_secrets should surface a warning when the LLM call fails."""
+
+    def _make_analysis(self):
+        return QuickstartAnalysis(name="myapp", version="1.0.0")
+
+    def _make_subchart_info(self):
+        return {
+            "pgvector": SubChartInfo(
+                name="pgvector", version="0.5.5",
+                secret_fields=["password", "host"],
+            ),
+        }
+
+    def test_returns_warning_on_llm_exception(self):
+        class _FailingProvider:
+            def complete(self, system, prompt, **kw):
+                raise RuntimeError("API unavailable")
+
+        decisions, warning = _llm_classify_secrets(
+            _FailingProvider(), self._make_analysis(), self._make_subchart_info(),
+        )
+        assert len(decisions) == 2
+        assert warning is not None
+        assert "LLM secret classification failed" in warning
+        assert "API unavailable" in warning
+
+    def test_returns_no_warning_on_success(self):
+        class _SuccessProvider:
+            def complete(self, system, prompt, **kw):
+                from types import SimpleNamespace
+                return SimpleNamespace(
+                    parsed={
+                        "secrets": [
+                            {"name": "password", "group": "pgvector",
+                             "classification": "auto-generate"},
+                            {"name": "host", "group": "pgvector",
+                             "classification": "static-config",
+                             "default_value": "localhost"},
+                        ],
+                    },
+                    content="",
+                )
+
+        decisions, warning = _llm_classify_secrets(
+            _SuccessProvider(), self._make_analysis(), self._make_subchart_info(),
+        )
+        assert warning is None
+        assert len(decisions) == 2
+
+    def test_build_new_profile_surfaces_warning(self):
+        class _FailingProvider:
+            def complete(self, system, prompt, **kw):
+                raise RuntimeError("timeout")
+
+        from quickpat.pipeline import TransformResult
+        result = TransformResult(success=False)
+        profile = _build_new_profile(
+            self._make_analysis(), self._make_subchart_info(),
+            _FailingProvider(), result, "", "",
+        )
+        assert any("LLM secret classification failed" in w for w in result.warnings)
+        assert len(profile.secret_decisions) == 2

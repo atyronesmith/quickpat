@@ -1490,3 +1490,51 @@ class TestIncrementalUpdate:
         result2 = compose_qs_from_spec(str(spec_file), output_dir=qs_out)
         assert 'README.md' in result2.files_created
         assert len(result2.files_created) == 1
+
+
+# ── Validation success semantics ─────────────────────────────────────────────
+
+
+class TestComposeValidationSuccess:
+    """compose_from_spec success reflects VP validation; invalid output is not synced."""
+
+    def test_success_false_when_validation_fails(self, tmp_path, monkeypatch):
+        from quickpat.validator import ValidationResult, Issue
+
+        out = str(tmp_path / 'out')
+        result = compose_from_spec(LEMONADE_SPEC, output_dir=out)
+        assert result.success
+
+        def fake_validate_and_fix(*args, **kwargs):
+            return ValidationResult(valid=False, issues=[
+                Issue('values-global.yaml', 'error', 'forced validation failure'),
+            ])
+
+        monkeypatch.setattr(
+            'quickpat.pipeline.validate_and_fix', fake_validate_and_fix,
+        )
+
+        before = (Path(out) / 'values-global.yaml').read_text()
+        result2 = compose_from_spec(LEMONADE_SPEC, output_dir=out)
+        assert result2.validation is not None
+        assert not result2.validation.valid
+        assert not result2.success
+        assert result2.files_created == []
+        assert (Path(out) / 'values-global.yaml').read_text() == before
+
+    def test_output_dir_not_created_when_validation_fails(self, tmp_path, monkeypatch):
+        from quickpat.validator import ValidationResult, Issue
+
+        def fake_validate_and_fix(*args, **kwargs):
+            return ValidationResult(valid=False, issues=[
+                Issue('values-global.yaml', 'error', 'forced validation failure'),
+            ])
+
+        monkeypatch.setattr(
+            'quickpat.pipeline.validate_and_fix', fake_validate_and_fix,
+        )
+
+        out = tmp_path / 'vp-out'
+        result = compose_from_spec(LEMONADE_SPEC, output_dir=str(out))
+        assert not result.success
+        assert not out.exists()
