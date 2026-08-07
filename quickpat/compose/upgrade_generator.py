@@ -210,7 +210,7 @@ def _render_runbook(
             to_ch = c['to'].get('channel', '(default)')
             approval = c['to'].get('installPlanApproval', 'Automatic')
             ch_display = f"{from_ch} → **{to_ch}**" if from_ch != to_ch else f"{to_ch} (unchanged)"
-            lines.append(f"| {c['display_name']} | {from_ch} | {to_ch} | {approval} |")
+            lines.append(f"| {c['display_name']} | {from_ch} | {ch_display} | {approval} |")
         lines.append("")
 
         if any(c['to'].get('installPlanApproval') == 'Manual' for c in changed_ops):
