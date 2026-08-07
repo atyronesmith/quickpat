@@ -16,7 +16,7 @@ def make_provider(config: dict) -> Provider | None:
     model = config.get("model")
 
     if provider_name == "openai":
-        from .openai import OpenAIProvider
+        from .openai_provider import OpenAIProvider
         return OpenAIProvider(model=model, api_key=config.get("api_key"))
     elif provider_name == "anthropic":
         from .anthropic import AnthropicProvider
