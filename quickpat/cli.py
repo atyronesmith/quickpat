@@ -3,12 +3,12 @@
 import argparse
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import __version__
 from .analyzer import QuickstartAnalyzer
+from .clone import cloned_repo, resolve_path_ctx
 from .config import get as cfg
 from .generator import build_report
 from .providers import make_provider
@@ -321,37 +321,12 @@ def cmd_list():
     print("\nUse: quickpat create <name>")
 
 
-def resolve_path(path_or_url):
-    """Resolve a path, GitHub URL, or registry name to a local path."""
-    # Direct URL
-    if path_or_url.startswith(('https://github.com/', 'git@')):
-        return _clone(path_or_url)
-
-    # Local path
-    if Path(path_or_url).exists():
-        return path_or_url
-
-    # Try registry name
-    try:
-        url = resolve_name(path_or_url)
-        return _clone(url)
-    except (ValueError, RuntimeError) as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
-
-
-def _clone(url):
-    tmpdir = tempfile.mkdtemp(prefix='quickpat-')
-    print(f"Cloning {url}...")
-    subprocess.run(
-        ['git', 'clone', '--depth', '1', url, tmpdir],
-        check=True, capture_output=True,
-    )
-    return tmpdir
-
-
 def cmd_analyze(args):
-    path = resolve_path(args.path)
+    with resolve_path_ctx(args.path) as path:
+        _cmd_analyze(path, args)
+
+
+def _cmd_analyze(path, args):
     analyzer = QuickstartAnalyzer(path)
     try:
         analysis = analyzer.analyze()
@@ -377,7 +352,11 @@ def cmd_analyze(args):
 def cmd_create(args):
     print("=== QuickPat: AI Quickstart -> Validated Pattern ===\n")
 
-    path = resolve_path(args.path)
+    with resolve_path_ctx(args.path) as path:
+        _cmd_create(path, args)
+
+
+def _cmd_create(path, args):
 
     # Show analysis first
     try:
@@ -388,13 +367,17 @@ def cmd_create(args):
 
     print_analysis(analysis)
 
-    if args.non_interactive or args.llm != 'none':
-        # Pipeline mode
+    # Build LLM provider when requested (independent of interactive mode)
+    llm = None
+    if args.llm != 'none':
         llm = make_provider({
             "provider": args.llm,
             "model": args.model or None,
             "base_url": getattr(args, "llm_url", None),
         })
+
+    if args.non_interactive:
+        # Pipeline mode
         config = build_default_config(analysis, args, path)
         crc = getattr(args, 'crc_scripts', False)
         ignore_diffs = _parse_ignore_differences(
@@ -433,15 +416,30 @@ def cmd_create(args):
         sys.exit(0 if result.success else 1)
     else:
         # Interactive mode
-        config = interactive_config(analysis, args)
+        config = interactive_config(analysis, args, quickstart_path=path)
 
         if config['chart_strategy'] == 'remote':
+            extra = {}
+            if 'tier' in config:
+                extra['tier'] = config['tier']
+            if config.get('git_repo_url'):
+                extra['git_repo_url'] = config['git_repo_url']
+            if config.get('chart_path_in_repo') is not None:
+                extra['chart_path_in_repo'] = config['chart_path_in_repo']
+            if config.get('chart_branch'):
+                extra['chart_branch'] = config['chart_branch']
+            if 'operators' in config:
+                extra['operators'] = config['operators']
+            if 'use_vault' in config:
+                extra['use_vault'] = config['use_vault']
+
             result = transform_remote(
                 quickstart_path=path,
                 output_dir=config['output_dir'],
                 pattern_name=config['pattern_name'],
+                llm=llm,
+                extra_config=extra or None,
             )
-            _print_transform_result(result)
         else:
             extra_keys = ('tier', 'secret_config', 'namespace_overrides', 'global_options')
             extra = {k: config[k] for k in extra_keys if k in config}
@@ -449,11 +447,13 @@ def cmd_create(args):
                 quickstart_path=path,
                 output_dir=config['output_dir'],
                 pattern_name=config['pattern_name'],
+                llm=llm,
                 use_vault=config['use_vault'],
                 chart_strategy=config['chart_strategy'],
                 extra_config=extra or None,
             )
-            print_results(result.config or config)
+        _print_transform_result(result)
+        sys.exit(0 if result.success else 1)
 
 
 def _parse_target_arg(target_str) -> "TargetSpec | dict | None":
@@ -691,31 +691,28 @@ def cmd_batch(args):
         print(f"[{i}/{len(registry)}] {name}...")
 
         try:
-            tmpdir = _clone(url)
+            with cloned_repo(url) as tmpdir:
+                pattern_name = name
+                output_dir = str(output_root / pattern_name)
+
+                result = transform(
+                    quickstart_path=tmpdir,
+                    output_dir=output_dir,
+                    pattern_name=pattern_name,
+                    llm=llm,
+                )
+                if result.success:
+                    print(f"  OK -> {output_dir}/")
+                    results.append((name, 'OK', ''))
+                else:
+                    issues = len(result.warnings)
+                    print(f"  WARN ({issues} issues)")
+                    results.append((name, 'WARN', f'{issues} issues'))
         except subprocess.CalledProcessError:
             print("  clone failed")
             results.append((name, 'FAIL', 'clone failed'))
             if not args.keep_going:
                 break
-            continue
-
-        pattern_name = name
-        output_dir = str(output_root / pattern_name)
-
-        try:
-            result = transform(
-                quickstart_path=tmpdir,
-                output_dir=output_dir,
-                pattern_name=pattern_name,
-                llm=llm,
-            )
-            if result.success and result.validation and result.validation.valid:
-                print(f"  OK -> {output_dir}/")
-                results.append((name, 'OK', ''))
-            else:
-                issues = len(result.warnings)
-                print(f"  WARN ({issues} issues)")
-                results.append((name, 'WARN', f'{issues} issues'))
         except Exception as e:
             print(f"  FAIL: {e}")
             results.append((name, 'FAIL', str(e)))
@@ -740,7 +737,11 @@ def cmd_batch(args):
 
 def cmd_check_ready(args):
     """Check if a quickstart is publication-ready."""
-    path = resolve_path(args.path)
+    with resolve_path_ctx(args.path) as path:
+        _cmd_check_ready(path, args)
+
+
+def _cmd_check_ready(path, args):
     result = check_readiness(path)
 
     status = "READY" if result.ready else "NOT READY"
@@ -911,7 +912,7 @@ def print_analysis(analysis):
     print()
 
 
-def interactive_config(analysis, args):
+def interactive_config(analysis, args, quickstart_path=None):
     config = {}
 
     print("--- Configuration ---\n")
@@ -1029,7 +1030,14 @@ def interactive_config(analysis, args):
         config['chart_repo_url'] = ask("Helm repository URL", default_repo)
         config['chart_version'] = ask("Chart version", analysis.version)
     elif config['chart_strategy'] == 'remote':
-        analyzer = QuickstartAnalyzer(resolve_path(args.path))
+        qs_path = quickstart_path or args.path
+        if not Path(qs_path).exists():
+            print(
+                "Error: remote strategy requires a local quickstart path",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        analyzer = QuickstartAnalyzer(qs_path)
         git_url, chart_path_in_repo = analyzer.detect_git_origin()
         config['git_repo_url'] = ask("Git repository URL", git_url)
         config['chart_path_in_repo'] = ask("Chart path in repo", chart_path_in_repo)
@@ -1080,19 +1088,19 @@ def cmd_update(args):
     print(f"Chart path: {profile.source_chart_path}")
 
     # Clone upstream
-    qs_path = _clone(profile.source_repo_url)
+    with cloned_repo(profile.source_repo_url) as qs_path:
+        llm = make_provider({
+            "provider": args.llm,
+            "model": args.model or None,
+            "base_url": getattr(args, "llm_url", None),
+        })
 
-    llm = make_provider({
-        "provider": args.llm,
-        "model": args.model or None,
-        "base_url": getattr(args, "llm_url", None),
-    })
-
-    result = transform_remote(
-        quickstart_path=qs_path,
-        output_dir=pattern_dir,
-        llm=llm,
-    )
+        result = transform_remote(
+            quickstart_path=qs_path,
+            output_dir=pattern_dir,
+            llm=llm,
+            force=args.force,
+        )
     _print_transform_result(result)
     sys.exit(0 if result.success else 1)
 
