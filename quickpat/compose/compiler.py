@@ -13,7 +13,7 @@ class ComposeError(Exception):
 def compile_spec(
     spec: ApplicationSpec,
     output_dir: str,
-    spec_dir: str = None,
+    spec_dir: str | None = None,
     create_service_account: bool = True,
     cli_target=None,
 ) -> tuple:
@@ -101,7 +101,7 @@ def compile_spec(
         version='0.1.0',
         description=spec.description,
         charts=[main_chart],
-        detected_operators=set(operators),
+        detected_operators=list(operators),
         detected_secrets=all_secrets,
     )
 

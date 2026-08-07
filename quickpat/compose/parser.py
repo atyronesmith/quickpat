@@ -132,7 +132,7 @@ class ApplicationSpec:
     vault_enabled: bool = False                   # vault: {enabled: true} in spec
     top_level_secrets: list = field(default_factory=list)  # list of TopLevelSecret
     docs: list = field(default_factory=list)      # list of DocEntry
-    target: object = None                         # TargetSpec | None
+    target: TargetSpec | None = None
 
 
 VALID_TIERS = {'sandbox', 'tested', 'maintained'}
@@ -283,7 +283,7 @@ def _parse_custom(raw: dict) -> dict:
     return custom
 
 
-def _parse_target(raw) -> object:
+def _parse_target(raw) -> TargetSpec | None:
     """Parse target: {platform: rhoai, version: "3.5"} or return None."""
     if not raw:
         return None

@@ -9,7 +9,7 @@ rendering in future phases.
 from jinja2 import Environment, Undefined
 
 
-def make_context(spec, block_name: str, block_instance, resolved_outputs: dict = None) -> dict:
+def make_context(spec, block_name: str, block_instance, resolved_outputs: dict | None = None) -> dict:
     """Build a Jinja2 template context for a single block.
 
     Args:
@@ -33,7 +33,7 @@ def make_context(spec, block_name: str, block_instance, resolved_outputs: dict =
     }
 
 
-def make_custom_context(spec, comp_name: str, comp, resolved_outputs: dict = None) -> dict:
+def make_custom_context(spec, comp_name: str, comp, resolved_outputs: dict | None = None) -> dict:
     """Build a Jinja2 template context for a custom component."""
     return {
         'app': {'name': spec.name},

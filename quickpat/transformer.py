@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .analyzer import QuickstartAnalysis, SecretRef, ChartInfo
+from .analyzer import QuickstartAnalysis, ChartInfo
 
 
 ALL_RULES = ['secrets', 'hooks', 'registry']
@@ -41,8 +41,8 @@ class TransformResult:
 def transform_chart(
     chart_dir: str,
     analysis: QuickstartAnalysis,
-    chart_info: ChartInfo = None,
-    rules: list = None,
+    chart_info: ChartInfo | None = None,
+    rules: list | None = None,
 ) -> TransformResult:
     """Apply rewrite rules to a chart directory.
 
@@ -122,7 +122,7 @@ def _group_secrets(secrets: list, chart_name: str) -> dict:
 def _externalize_secrets(
     chart_dir: Path,
     secrets: list,
-    chart_info: ChartInfo = None,
+    chart_info: ChartInfo | None = None,
 ) -> TransformResult:
     """Replace plaintext secrets with ExternalSecret CRDs."""
     result = TransformResult()
@@ -177,7 +177,7 @@ def _clear_secret_values(values_file: Path, secrets: list) -> bool:
             rf'^([ \t]+{re.escape(key)}:[ \t]+)(?!""|\'\')(\S[^\n]*)$',
             re.MULTILINE,
         )
-        content = pattern.sub(rf'\g<1>""', content)
+        content = pattern.sub(r'\g<1>""', content)
 
     if content != original:
         values_file.write_text(content)

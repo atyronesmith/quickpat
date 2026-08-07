@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from . import __version__
 from .analyzer import QuickstartAnalyzer
@@ -20,6 +21,9 @@ from .registry import (
     detect_local_forks, fetch_chart_index,
 )
 from .validator import validate, validate_and_fix
+
+if TYPE_CHECKING:
+    from .compose.parser import TargetSpec
 
 
 def main():
@@ -314,7 +318,7 @@ def cmd_list():
         print(f"  {entry['name']}")
         print(f"    {entry.get('url', '')}")
 
-    print(f"\nUse: quickpat create <name>")
+    print("\nUse: quickpat create <name>")
 
 
 def resolve_path(path_or_url):
@@ -366,8 +370,8 @@ def cmd_analyze(args):
     report_path.write_text(build_report(analysis))
 
     print(f"Created: {output_dir}/")
-    print(f"  docs/quickstart-analysis.md")
-    print(f"\nRun 'quickpat create' to generate the full pattern here.")
+    print("  docs/quickstart-analysis.md")
+    print("\nRun 'quickpat create' to generate the full pattern here.")
 
 
 def cmd_create(args):
@@ -452,7 +456,7 @@ def cmd_create(args):
             print_results(result.config or config)
 
 
-def _parse_target_arg(target_str):
+def _parse_target_arg(target_str) -> "TargetSpec | dict | None":
     """Parse --target PLATFORM=VERSION or PLATFORM=FROM..TO.
 
     Returns:
@@ -464,8 +468,8 @@ def _parse_target_arg(target_str):
     if not target_str:
         return None
     if '=' not in target_str:
-        print(f"Error: --target must be PLATFORM=VERSION or PLATFORM=FROM..TO "
-              f"(e.g. rhoai=3.5 or rhoai=3.4..3.5)", file=sys.stderr)
+        print("Error: --target must be PLATFORM=VERSION or PLATFORM=FROM..TO "
+              "(e.g. rhoai=3.5 or rhoai=3.4..3.5)", file=sys.stderr)
         sys.exit(1)
 
     platform, rest = target_str.split('=', 1)
@@ -532,15 +536,17 @@ def cmd_compose(args):
         if result.success:
             runbook = result.files_created[0] if result.files_created else 'RUNBOOK.md'
             print(f"Runbook written: {result.pattern_dir}/{runbook}")
-            print(f"\nNext steps:")
+            print("\nNext steps:")
             print(f"  1. Review the runbook: {result.pattern_dir}/{runbook}")
-            print(f"  2. Complete all BLOCKING pre-upgrade items")
+            print("  2. Complete all BLOCKING pre-upgrade items")
             print(f"  3. quickpat compose spec.yaml --target {platform}={tv}")
         else:
             for w in result.warnings:
                 print(f"Error: {w}", file=sys.stderr)
             sys.exit(1)
         return
+
+    assert not isinstance(cli_target, dict)
 
     if fmt == 'qs':
         print("=== QuickPat Compose: ApplicationSpec -> Quickstart Helm Chart ===\n")
@@ -687,7 +693,7 @@ def cmd_batch(args):
         try:
             tmpdir = _clone(url)
         except subprocess.CalledProcessError:
-            print(f"  clone failed")
+            print("  clone failed")
             results.append((name, 'FAIL', 'clone failed'))
             if not args.keep_going:
                 break
@@ -722,7 +728,7 @@ def cmd_batch(args):
     fail = sum(1 for _, s, _ in results if s == 'FAIL')
     skip = sum(1 for _, s, _ in results if s == 'SKIP')
 
-    print(f"\n--- Batch Summary ---\n")
+    print("\n--- Batch Summary ---\n")
     print(f"  {'Quickstart':<40} {'Status':<6} {'Detail'}")
     print(f"  {'─'*40} {'─'*6} {'─'*30}")
     for name, status, detail in results:
@@ -783,7 +789,6 @@ def cmd_transform(args):
             sys.exit(1)
 
     # Analyze each chart in the pattern
-    total_result = tx_chart.__class__.__bases__  # just need the import
     from .transformer import TransformResult
     total = TransformResult()
 
@@ -1144,19 +1149,19 @@ def build_default_config(analysis, args, quickstart_path=None):
 
 def print_results(config):
     output = config['output_dir']
-    print(f"\n--- Pattern Generated ---\n")
+    print("\n--- Pattern Generated ---\n")
     print(f"Created: {output}/")
-    print(f"  values-global.yaml")
+    print("  values-global.yaml")
     gn = config.get('cluster_group_name', 'prod')
     print(f"  values-{gn}.yaml")
     if config.get('use_vault'):
-        print(f"  values-secret.yaml.template")
-    print(f"  Makefile")
-    print(f"  Makefile-common")
-    print(f"  pattern.sh")
-    print(f"  pattern-metadata.yaml")
-    print(f"  ansible.cfg")
-    print(f"  .gitignore")
+        print("  values-secret.yaml.template")
+    print("  Makefile")
+    print("  Makefile-common")
+    print("  pattern.sh")
+    print("  pattern-metadata.yaml")
+    print("  ansible.cfg")
+    print("  .gitignore")
     if config.get('chart_strategy') == 'local':
         charts_dir = Path(output) / 'charts'
         if charts_dir.is_dir():
@@ -1165,17 +1170,17 @@ def print_results(config):
                     print(f"  charts/{d.name}/")
         else:
             print(f"  charts/{config.get('app_name', 'app')}/")
-    print(f"  overrides/")
-    print(f"  docs/quickstart-analysis.md")
+    print("  overrides/")
+    print("  docs/quickstart-analysis.md")
 
-    print(f"\nNext steps:")
+    print("\nNext steps:")
     print(f"  1. cd {output}")
-    print(f"  2. git init && git add -A && git commit -m 'Initial pattern'")
+    print("  2. git init && git add -A && git commit -m 'Initial pattern'")
     print(f"  3. Review and customize values-{gn}.yaml")
     print(f"  4. cp values-secret.yaml.template ~/values-secret-{config['pattern_name']}.yaml")
     print(f"  5. Edit ~/values-secret-{config['pattern_name']}.yaml with your secrets")
-    print(f"  6. oc login <cluster>")
-    print(f"  7. ./pattern.sh make install")
+    print("  6. oc login <cluster>")
+    print("  7. ./pattern.sh make install")
 
 
 def cmd_init_ci(args):

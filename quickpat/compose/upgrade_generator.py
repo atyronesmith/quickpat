@@ -24,7 +24,7 @@ def generate_upgrade_runbook(
     from_version: str,
     to_version: str,
     output_dir: Path,
-    spec_dir: str = None,
+    spec_dir: str | None = None,
 ) -> Path:
     """Generate an upgrade runbook and write it to output_dir.
 
@@ -136,8 +136,8 @@ def _render_runbook(
     lines += [
         f"# Upgrade Runbook: {platform.upper()} {from_version} → {to_version}",
         "",
-        f"| Field | Value |",
-        f"|---|---|",
+        "| Field | Value |",
+        "|---|---|",
         f"| Generated | {today} |",
         f"| Pattern | `{spec.name}` |",
         f"| Platform | {platform_display} |",
@@ -302,7 +302,7 @@ def _render_runbook(
         "Update the spec repo to target the new version and commit:",
         "",
         "```bash",
-        f"# In the spec repo",
+        "# In the spec repo",
         f"quickpat compose spec.yaml --target {platform}={to_version}",
         f"quickpat compose spec.yaml --target {platform}={to_version} --format qs",
         "",
@@ -337,10 +337,10 @@ def _render_runbook(
             "Because `installPlanApproval: Manual` is set, approve the pending InstallPlans:",
             "",
             "```bash",
-            f"oc get installplan -n redhat-ods-operator",
-            f"# Approve each pending plan:",
-            f"oc patch installplan <name> -n redhat-ods-operator --type merge \\",
-            f"  -p '{{\"spec\":{{\"approved\":true}}}}'",
+            "oc get installplan -n redhat-ods-operator",
+            "# Approve each pending plan:",
+            "oc patch installplan <name> -n redhat-ods-operator --type merge \\",
+            "  -p '{\"spec\":{\"approved\":true}}'",
             "```",
             "",
         ]

@@ -41,7 +41,7 @@ class ValidationResult:
 # ── Public API ───────────────────────────────────────────────────────
 
 
-def validate(pattern_dir: str, config: dict = None, llm: Provider = None) -> ValidationResult:
+def validate(pattern_dir: str, config: dict | None = None, llm: Provider | None = None) -> ValidationResult:
     """Validate a pattern directory. Returns issues found."""
     out = Path(pattern_dir)
     if not out.is_dir():
@@ -76,14 +76,16 @@ def validate(pattern_dir: str, config: dict = None, llm: Provider = None) -> Val
 
 def validate_and_fix(
     pattern_dir: str,
-    config: dict = None,
-    llm: Provider = None,
+    config: dict | None = None,
+    llm: Provider | None = None,
     max_iterations: int = 3,
 ) -> ValidationResult:
     """Validate, auto-fix issues, and re-validate in a loop."""
     total_fixes = 0
+    result: ValidationResult | None = None
 
-    for i in range(max_iterations):
+    # Always run at least one validation pass, even if max_iterations <= 0.
+    for i in range(max(max_iterations, 1)):
         result = validate(pattern_dir, config, llm)
         result.iterations = i + 1
 
@@ -96,6 +98,7 @@ def validate_and_fix(
         if fixed == 0:
             break
 
+    assert result is not None
     result.fixes_applied = total_fixes
     return result
 
@@ -186,7 +189,7 @@ def _check_values_global(out: Path) -> list:
     return issues
 
 
-def _check_values_hub(out: Path, config: dict = None) -> list:
+def _check_values_hub(out: Path, config: dict | None = None) -> list:
     issues = []
     hub_file = _find_values_group_file(out)
     path = out / hub_file

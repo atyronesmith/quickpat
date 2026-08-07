@@ -11,10 +11,9 @@ from typing import Optional
 from .analyzer import QuickstartAnalyzer, QuickstartAnalysis
 from .config import get as cfg
 from .generator import PatternGenerator
-from .operators import OPERATORS
 from .profile import (
     PatternProfile, SecretDecision, ComputedFieldDecision, DriftEntry,
-    OverrideEntry, InfraDecision, save_profile, load_profile,
+    OverrideEntry, save_profile, load_profile,
     compute_fingerprint, diff_profile,
 )
 from .providers.base import Provider
@@ -197,16 +196,16 @@ def skill_generate(analysis: QuickstartAnalysis, config: dict) -> str:
 
 def transform(
     quickstart_path: str,
-    output_dir: str = None,
-    pattern_name: str = None,
-    llm: Provider = None,
+    output_dir: str | None = None,
+    pattern_name: str | None = None,
+    llm: Provider | None = None,
     use_vault: bool = True,
     chart_strategy: str = "remote",
     auto_fix: bool = True,
     max_fix_iterations: int = 3,
-    extra_config: dict = None,
+    extra_config: dict | None = None,
     enable_transform: bool = False,
-    transform_rules: list = None,
+    transform_rules: list | None = None,
 ) -> TransformResult:
     """Full pipeline: analyze -> detect -> generate -> validate/fix."""
     result = TransformResult(success=False)
@@ -299,8 +298,8 @@ def transform(
 
 def compose_from_spec(
     spec_path: str,
-    output_dir: str = None,
-    pattern_name: str = None,
+    output_dir: str | None = None,
+    pattern_name: str | None = None,
     auto_fix: bool = True,
     max_fix_iterations: int = 3,
     create_service_account: bool = True,
@@ -390,7 +389,7 @@ def compose_upgrade_from_spec(
     platform: str,
     from_version: str,
     to_version: str,
-    output_dir: str = None,
+    output_dir: str | None = None,
 ) -> TransformResult:
     """Generate an upgrade runbook for upgrading a spec repo between versions.
 
@@ -431,8 +430,8 @@ def compose_upgrade_from_spec(
 
 def compose_qs_from_spec(
     spec_path: str,
-    output_dir: str = None,
-    pattern_name: str = None,
+    output_dir: str | None = None,
+    pattern_name: str | None = None,
     create_service_account: bool = True,
     cli_target=None,
 ) -> TransformResult:
@@ -498,12 +497,12 @@ def compose_qs_from_spec(
 
 def transform_remote(
     quickstart_path: str,
-    output_dir: str = None,
-    pattern_name: str = None,
-    llm: Provider = None,
+    output_dir: str | None = None,
+    pattern_name: str | None = None,
+    llm: Provider | None = None,
     auto_fix: bool = True,
     max_fix_iterations: int = 3,
-    extra_config: dict = None,
+    extra_config: dict | None = None,
 ) -> TransformResult:
     """Remote strategy pipeline: analyze -> fetch sub-charts -> decide -> generate -> profile."""
     result = TransformResult(success=False)
@@ -677,7 +676,6 @@ def _rebuild_profile(
         git_url, chart_path_in_repo,
     )
     # Carry forward unchanged decisions from existing profile
-    existing_secret_keys = {(s.group, s.name) for s in existing.secret_decisions}
     for s in existing.secret_decisions:
         key = (s.group, s.name)
         new_keys = {(ns.group, ns.name) for ns in new_profile.secret_decisions}

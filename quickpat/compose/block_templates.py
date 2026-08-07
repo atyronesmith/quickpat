@@ -538,7 +538,7 @@ stringData:
 def llama_stack_templates(
     block_name: str,
     config: dict,
-    resolved_inputs: dict = None,
+    resolved_inputs: dict | None = None,
 ) -> dict[str, str]:
     """Generate LlamaStack server Deployment + Service + ConfigMap.
 
@@ -663,7 +663,7 @@ spec:
 def data_pipeline_templates(
     block_name: str,
     config: dict,
-    resolved_inputs: dict = None,
+    resolved_inputs: dict | None = None,
 ) -> dict[str, str]:
     """Generate Tekton Pipeline + Task templates for a data-pipeline block.
 
@@ -1065,36 +1065,35 @@ def build_values(spec, secret_keys: list[str]) -> str:
             provider = cfg.get('provider', 'minio')
             lines += [
                 f'{key}:',
-                f'  # provider: which storage backend to use at deploy time.',
-                f'  #   minio  = deploy MinIO in-cluster (default for bare metal)',
-                f'  #   odf    = use OpenShift Data Foundation (requires ODF installed)',
-                f'  #   s3     = use external AWS S3 or S3-compatible endpoint',
+                '  # provider: which storage backend to use at deploy time.',
+                '  #   minio  = deploy MinIO in-cluster (default for bare metal)',
+                '  #   odf    = use OpenShift Data Foundation (requires ODF installed)',
+                '  #   s3     = use external AWS S3 or S3-compatible endpoint',
                 f'  provider: {provider}',
                 f'  bucket: {cfg.get("bucket", "data")}',
                 f'  storage: {cfg.get("storage", "20Gi")}  # MinIO PVC size; ignored for odf and s3',
-                f'  image: quay.io/trustyai/modelmesh-minio-examples:latest  # MinIO only',
-                f'  endpoint: ""  # s3: e.g. https://s3.amazonaws.com; derived for minio and odf',
-                f'  region: us-east-1  # s3 only',
-                f'  odfStorageClass: openshift-storage.noobaa.io  # odf only',
+                '  image: quay.io/trustyai/modelmesh-minio-examples:latest  # MinIO only',
+                '  endpoint: ""  # s3: e.g. https://s3.amazonaws.com; derived for minio and odf',
+                '  region: us-east-1  # s3 only',
+                '  odfStorageClass: openshift-storage.noobaa.io  # odf only',
             ]
 
         elif btype == 'llama-stack':
-            port = cfg.get('port', 8321)
             lines += [
                 f'{key}:',
-                f'  image: quay.io/rh-ai-quickstart/llamastack-dist-vllm:0.2.33',
-                f'  # inferenceUrl: vLLM predictor endpoint (derived from llm input block)',
-                f'  inferenceUrl: ""',
-                f'  # pgvectorHost: set if using LlamaStack memory with pgvector (derived from vector_store input block)',
-                f'  pgvectorHost: ""',
-                f'  pgvectorDb: vectordb',
-                f'  resources:',
-                f'    requests:',
-                f'      cpu: "1"',
-                f'      memory: 2Gi',
-                f'    limits:',
-                f'      cpu: "2"',
-                f'      memory: 4Gi',
+                '  image: quay.io/rh-ai-quickstart/llamastack-dist-vllm:0.2.33',
+                '  # inferenceUrl: vLLM predictor endpoint (derived from llm input block)',
+                '  inferenceUrl: ""',
+                '  # pgvectorHost: set if using LlamaStack memory with pgvector (derived from vector_store input block)',
+                '  pgvectorHost: ""',
+                '  pgvectorDb: vectordb',
+                '  resources:',
+                '    requests:',
+                '      cpu: "1"',
+                '      memory: 2Gi',
+                '    limits:',
+                '      cpu: "2"',
+                '      memory: 4Gi',
             ]
 
         elif btype == 'data-pipeline':
@@ -1102,11 +1101,11 @@ def build_values(spec, secret_keys: list[str]) -> str:
             cron = {'hourly': '7 * * * *', 'daily': '7 2 * * *'}.get(schedule, '7 2 * * *')
             lines += [
                 f'{key}:',
-                f'  # image: ingestion pipeline container',
-                f'  image: quay.io/rh-ai-quickstart/ingestion-pipeline:latest',
-                f'  # schedule: manual | hourly | daily',
+                '  # image: ingestion pipeline container',
+                '  image: quay.io/rh-ai-quickstart/ingestion-pipeline:latest',
+                '  # schedule: manual | hourly | daily',
                 f'  schedule: {schedule}',
-                f'  # cronSchedule: override the cron expression (ignored when schedule is manual)',
+                '  # cronSchedule: override the cron expression (ignored when schedule is manual)',
                 f'  cronSchedule: "{cron}"',
             ]
 
@@ -1155,7 +1154,7 @@ def build_notes(prereqs: list[str], app_name: str) -> str:
 def build_create_secrets_sh(
     app_name: str,
     secret_decls: list[dict],
-    storage_providers: dict[str, str] = None,
+    storage_providers: dict[str, str] | None = None,
 ) -> str:
     """Generate scripts/create-secrets.sh for interactive secret creation.
 
@@ -1184,7 +1183,7 @@ def build_create_secrets_sh(
         if provider == 'odf':
             lines += [
                 f'# {block_name} uses ODF — credentials are managed by the',
-                f'# ObjectBucketClaim controller. No secrets to create here.',
+                '# ObjectBucketClaim controller. No secrets to create here.',
                 '',
             ]
         elif provider == 'minio':
@@ -1195,7 +1194,7 @@ def build_create_secrets_sh(
                 f'oc create secret generic {block_name}-credentials \\',
                 f'  --from-literal=AWS_ACCESS_KEY_ID="${{{key.upper()}_ACCESS}}" \\',
                 f'  --from-literal=AWS_SECRET_ACCESS_KEY="${{{key.upper()}_SECRET}}" \\',
-                f'  -n "$NAMESPACE" --dry-run=client -o yaml | oc apply -f -',
+                '  -n "$NAMESPACE" --dry-run=client -o yaml | oc apply -f -',
                 '',
             ]
         elif provider == 's3':
@@ -1206,7 +1205,7 @@ def build_create_secrets_sh(
                 f'oc create secret generic {block_name}-credentials \\',
                 f'  --from-literal=AWS_ACCESS_KEY_ID="${{{key.upper()}_ACCESS}}" \\',
                 f'  --from-literal=AWS_SECRET_ACCESS_KEY="${{{key.upper()}_SECRET}}" \\',
-                f'  -n "$NAMESPACE" --dry-run=client -o yaml | oc apply -f -',
+                '  -n "$NAMESPACE" --dry-run=client -o yaml | oc apply -f -',
                 '',
             ]
 
@@ -1238,13 +1237,13 @@ def build_create_secrets_sh(
             create_block = [
                 f'oc create secret generic {name} \\',
                 *[f'{a} \\' for a in key_args],
-                f'  -n "$NAMESPACE" --dry-run=client -o yaml | oc apply -f -',
+                '  -n "$NAMESPACE" --dry-run=client -o yaml | oc apply -f -',
             ]
             if optional and not generate:
                 # Only create the secret if the user supplied at least one field.
                 guard = ''.join(f'${{{pv}}}' for pv in prompt_vars)
                 lines.append(f'if [ -n "{guard}" ]; then')
-                lines += [f'  {l}' for l in create_block]
+                lines += [f'  {line}' for line in create_block]
                 lines += ['else', f'  echo "Skipping {name} (no value provided)."', 'fi', '']
             else:
                 lines += [*create_block, '']

@@ -12,6 +12,7 @@ Usage:
 """
 
 import re
+from collections.abc import Iterator
 from difflib import get_close_matches
 from pathlib import Path
 
@@ -28,7 +29,7 @@ _QS_OPEN  = re.compile(r'^\s*<!--\s*qs-only\s*-->\s*$', re.IGNORECASE)
 _END      = re.compile(r'^\s*<!--\s*end\s*-->\s*$',      re.IGNORECASE)
 
 
-def validate_spec(spec: ApplicationSpec, spec_dir: str = None) -> ValidationResult:
+def validate_spec(spec: ApplicationSpec, spec_dir: str | None = None) -> ValidationResult:
     """Run all spec-level checks. Returns a ValidationResult.
 
     Error-severity issues indicate the spec cannot produce correct output.
@@ -356,7 +357,7 @@ def _fmt(names) -> str:
     return ', '.join(sorted(names))
 
 
-def _flatten(obj, prefix='') -> list:
+def _flatten(obj, prefix='') -> Iterator[tuple[str, object]]:
     """Yield (key_path, value) pairs from a nested dict/list, for scanning."""
     if isinstance(obj, dict):
         for k, v in obj.items():

@@ -14,18 +14,6 @@ import re
 import shutil
 from pathlib import Path
 
-
-def _secret_value_key(secret_name: str, field_name: str) -> str:
-    """camelCase values.yaml key for a top-level secret field.
-
-    Normalises both kebab- and snake_case (e.g. gemini + api_key -> geminiApiKey)
-    so the generated Secret template and values.yaml always reference the same
-    key. This is the Helm values key only; the Kubernetes Secret data key keeps
-    the raw field name (api_key).
-    """
-    parts = [p for p in re.split(r'[-_/]', f'{secret_name}-{field_name}') if p]
-    return parts[0] + ''.join(p.capitalize() for p in parts[1:])
-
 from .block_templates import (
     ai_platform_foundation_prereqs,
     gpu_compute_prereqs,
@@ -39,6 +27,18 @@ from .block_templates import (
     build_create_secrets_sh,
     _camel,
 )
+
+
+def _secret_value_key(secret_name: str, field_name: str) -> str:
+    """camelCase values.yaml key for a top-level secret field.
+
+    Normalises both kebab- and snake_case (e.g. gemini + api_key -> geminiApiKey)
+    so the generated Secret template and values.yaml always reference the same
+    key. This is the Helm values key only; the Kubernetes Secret data key keeps
+    the raw field name (api_key).
+    """
+    parts = [p for p in re.split(r'[-_/]', f'{secret_name}-{field_name}') if p]
+    return parts[0] + ''.join(p.capitalize() for p in parts[1:])
 
 
 class QSGenerator:

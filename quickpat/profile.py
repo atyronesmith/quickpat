@@ -139,8 +139,8 @@ def load_profile(output_dir: str) -> PatternProfile | None:
 
 def compute_fingerprint(
     chart_path: str,
-    subchart_info: dict = None,
-    operators: list = None,
+    subchart_info: dict | None = None,
+    operators: list | None = None,
 ) -> SourceFingerprint:
     """Compute a hash-based fingerprint of the source chart."""
     chart_dir = Path(chart_path)
@@ -149,12 +149,12 @@ def compute_fingerprint(
     values_yaml_hash = _hash_file(chart_dir / 'values.yaml')
 
     subchart_hashes = {}
-    if subchart_info:
+    if subchart_info is not None:
         for name, info in subchart_info.items():
             subchart_hashes[name] = getattr(info, 'template_hash', '')
 
     operator_versions = {}
-    if operators:
+    if operators is not None:
         for op in operators:
             if isinstance(op, str):
                 operator_versions[op] = ''
@@ -176,8 +176,8 @@ def compute_fingerprint(
 def diff_profile(
     profile: PatternProfile,
     new_fingerprint: SourceFingerprint,
-    new_secrets: list = None,
-    new_resource_types: list = None,
+    new_secrets: list | None = None,
+    new_resource_types: list | None = None,
 ) -> ProfileDiff:
     """Diff a stored profile against new analysis results.
 

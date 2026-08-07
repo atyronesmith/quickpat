@@ -60,7 +60,7 @@ def filter_doc(content: str, deploy_mode: str) -> str:
     return '\n'.join(result)
 
 
-def process_docs(doc_entries, spec_dir: str, output_dir: Path, deploy_mode: str):
+def process_docs(doc_entries, spec_dir: str | None, output_dir: Path, deploy_mode: str):
     """Read, filter, and write each DocEntry for the given deploy_mode.
 
     doc_entries: list of DocEntry objects (from ApplicationSpec.docs)

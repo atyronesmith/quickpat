@@ -2,13 +2,13 @@
 
 import re
 import shutil
-from datetime import date, timezone
+from datetime import date
 from pathlib import Path
 
 import yaml
 
 from . import __version__
-from .analyzer import QuickstartAnalysis, ChartInfo
+from .analyzer import QuickstartAnalysis
 from .config import get as cfg
 from .operators import OPERATORS, INFRA_CHARTS
 
@@ -1002,7 +1002,7 @@ podman run -it --rm --pull=newer \
         from .compose.doc_filter import process_docs
         process_docs(
             doc_entries=self.config.get('docs', []),
-            spec_dir=self.config.get('spec_dir'),
+            spec_dir=self.config.get('spec_dir') or str(self.output_dir),
             output_dir=self.output_dir,
             deploy_mode='vp',
         )
@@ -1023,15 +1023,6 @@ podman run -it --rm --pull=newer \
         overrides_dir = self.output_dir / 'overrides'
         overrides_dir.mkdir(exist_ok=True)
 
-        # Collect object-storage blocks from the compiled spec
-        storage_blocks = {
-            name: cfg_block
-            for name, cfg_block in self.config.get('_block_configs', {}).items()
-            if any(
-                b.block_type == 'object-storage'
-                for b in []  # resolved below
-            )
-        }
         # Simpler: check existing_custom_charts keys don't matter — use _block_configs
         # to find all block types. We need block type info from config.
         # The compiler puts block configs in _block_configs but not types.
@@ -1044,6 +1035,8 @@ podman run -it --rm --pull=newer \
         has_object_storage = bool(self.config.get('secret_groups'))
 
         platforms = cfg("platforms", ["AWS", "Azure", "GCP", "IBMCloud", "None"])
+        if platforms is None:
+            platforms = ["AWS", "Azure", "GCP", "IBMCloud", "None"]
         for platform in platforms:
             path = overrides_dir / f'values-{platform}.yaml'
             provider, endpoint, region = self._PLATFORM_STORAGE.get(
@@ -1072,7 +1065,7 @@ podman run -it --rm --pull=newer \
                 else:  # s3 / azure
                     lines += [
                         '# objectStorage:',
-                        f'#   provider: s3',
+                        '#   provider: s3',
                         f'#   endpoint: {endpoint}',
                         f'#   region: {region}',
                         '#   bucket: <your-pre-existing-bucket-name>',
@@ -1088,7 +1081,6 @@ podman run -it --rm --pull=newer \
         device_ops = self._device_operators()
 
         if 'gpu' in devices and device_ops:
-            gpu_lines = ['# GPU device overrides — applied when global.device=gpu']
             gpu_ns, gpu_subs, gpu_apps = {}, {}, {}
             for op_key in operators:
                 if op_key not in device_ops:
