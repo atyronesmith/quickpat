@@ -59,7 +59,7 @@ class PublishResult:
 
 
 def _git(args, cwd, check=True, capture=True, timeout=30):
-    """Run a git command, in the style of cli.py's _clone() / analyzer.detect_git_origin()."""
+    """Run a git command, in the style of quickpat.clone.cloned_repo() / analyzer.detect_git_origin()."""
     return subprocess.run(
         ['git', *args],
         cwd=str(cwd),
