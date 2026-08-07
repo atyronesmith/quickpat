@@ -102,6 +102,7 @@ class ProfileDiff:
     changed_subcharts: list = field(default_factory=list)
     new_subcharts: list = field(default_factory=list)
     summary: str = ""
+    unchanged: bool = False  # True when fingerprint and structure match exactly
 
 
 # ── Save / Load ──────────────────────────────────────────────────────
@@ -216,6 +217,8 @@ def diff_profile(
             key = (getattr(s, 'group', ''), getattr(s, 'name', ''))
             if key not in old_secret_keys:
                 diff.new_secrets.append(f"{key[0]}.{key[1]}")
+        if diff.new_secrets:
+            reasons.append(f"New secrets: {', '.join(diff.new_secrets)}")
 
     # Check for removed secrets
     if new_secrets is not None:
@@ -225,6 +228,8 @@ def diff_profile(
         for s in profile.secret_decisions:
             if (s.group, s.name) not in new_secret_keys:
                 diff.removed_secrets.append(f"{s.group}.{s.name}")
+        if diff.removed_secrets:
+            reasons.append(f"Removed secrets: {', '.join(diff.removed_secrets)}")
 
     # Check for new resource types
     if new_resource_types is not None:
@@ -236,17 +241,24 @@ def diff_profile(
         if diff.new_resource_types:
             reasons.append(f"New resource types: {', '.join(diff.new_resource_types)}")
 
+    chart_changed = old_fp.chart_yaml_hash != new_fingerprint.chart_yaml_hash
+    values_changed = old_fp.values_yaml_hash != new_fingerprint.values_yaml_hash
+
     # Classify change level
     if diff.new_secrets or diff.changed_subcharts:
         diff.change_level = "high"
-    elif diff.new_subcharts or diff.new_resource_types:
+    elif diff.new_subcharts or diff.new_resource_types or diff.removed_secrets:
         diff.change_level = "medium"
-    elif old_fp.chart_yaml_hash != new_fingerprint.chart_yaml_hash:
+    elif chart_changed or values_changed:
         diff.change_level = "low"
-        reasons.append("Chart.yaml changed (version bump)")
+        if chart_changed:
+            reasons.append("Chart.yaml changed (version bump)")
+        if values_changed:
+            reasons.append("values.yaml changed")
     else:
         diff.change_level = "low"
 
+    diff.unchanged = not reasons
     diff.summary = "; ".join(reasons) if reasons else "No significant changes"
     return diff
 

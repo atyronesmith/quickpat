@@ -297,6 +297,7 @@ class TestDiffProfile:
 
         diff = diff_profile(profile, fp)
         assert diff.change_level == "low"
+        assert diff.unchanged is True
         assert "No significant changes" in diff.summary
 
     def test_chart_yaml_changed_returns_low(self):
@@ -308,7 +309,20 @@ class TestDiffProfile:
         )
         diff = diff_profile(profile, new_fp)
         assert diff.change_level == "low"
+        assert diff.unchanged is False
         assert "version bump" in diff.summary
+
+    def test_values_yaml_changed_returns_low(self):
+        profile = _make_full_profile()
+        new_fp = SourceFingerprint(
+            chart_yaml_hash=profile.source_fingerprint.chart_yaml_hash,
+            values_yaml_hash="CHANGED",
+            subchart_hashes=profile.source_fingerprint.subchart_hashes,
+        )
+        diff = diff_profile(profile, new_fp)
+        assert diff.change_level == "low"
+        assert diff.unchanged is False
+        assert "values.yaml changed" in diff.summary
 
     def test_new_subchart_returns_medium(self):
         profile = _make_full_profile()
@@ -322,6 +336,7 @@ class TestDiffProfile:
         )
         diff = diff_profile(profile, new_fp)
         assert diff.change_level == "medium"
+        assert diff.unchanged is False
         assert "mcp-servers" in diff.new_subcharts
 
     def test_new_secrets_returns_high(self):
@@ -337,6 +352,7 @@ class TestDiffProfile:
             *profile.secret_decisions, new_secret,
         ])
         assert diff.change_level == "high"
+        assert diff.unchanged is False
         assert "pgvector.ssl_mode" in diff.new_secrets
 
     def test_changed_subchart_returns_high(self):
@@ -351,6 +367,7 @@ class TestDiffProfile:
         )
         diff = diff_profile(profile, new_fp)
         assert diff.change_level == "high"
+        assert diff.unchanged is False
         assert "pgvector" in diff.changed_subcharts
 
     def test_removed_secrets_tracked(self):
@@ -361,6 +378,8 @@ class TestDiffProfile:
         remaining = [profile.secret_decisions[0]]
         diff = diff_profile(profile, fp, new_secrets=remaining)
         assert len(diff.removed_secrets) == 2
+        assert diff.change_level == "medium"
+        assert diff.unchanged is False
 
     def test_new_resource_types_returns_medium(self):
         profile = _make_full_profile()
@@ -375,6 +394,7 @@ class TestDiffProfile:
             ],
         )
         assert diff.change_level == "medium"
+        assert diff.unchanged is False
         assert "NewCRD" in diff.new_resource_types
 
     def test_empty_profile_diff(self):
@@ -382,3 +402,12 @@ class TestDiffProfile:
         fp = SourceFingerprint()
         diff = diff_profile(profile, fp)
         assert diff.change_level == "low"
+        assert diff.unchanged is True
+
+    def test_same_secrets_list_is_unchanged(self):
+        profile = _make_full_profile()
+        fp = profile.source_fingerprint
+        diff = diff_profile(profile, fp, new_secrets=list(profile.secret_decisions))
+        assert diff.unchanged is True
+        assert diff.new_secrets == []
+        assert diff.removed_secrets == []
