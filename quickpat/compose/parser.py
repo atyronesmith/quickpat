@@ -29,6 +29,8 @@ class SecretDecl:
 @dataclass
 class SecretField:
     name: str
+    value: str = None
+    path: str = None
 
 
 @dataclass
@@ -375,7 +377,11 @@ def _parse_top_level_secrets(raw: list) -> list:
             elif isinstance(f, dict):
                 if 'name' not in f:
                     raise AppSpecError(f"secrets[{i}].fields[{j}]: missing 'name'")
-                parsed_fields.append(SecretField(name=f['name']))
+                parsed_fields.append(SecretField(
+                    name=f['name'],
+                    value=f.get('value'),
+                    path=f.get('path'),
+                ))
             else:
                 raise AppSpecError(f"secrets[{i}].fields[{j}] must be a string or mapping")
 

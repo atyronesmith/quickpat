@@ -750,6 +750,57 @@ class TestTopLevelSecrets:
             assert 'vaultPrefix' not in text, f"vaultPrefix leaked into {path}"
 
 
+VALUE_PATH_SECRETS_SPEC = """\
+apiVersion: supplychain/v1alpha1
+kind: ApplicationSpec
+metadata:
+  name: sec-value-path-test
+  tier: sandbox
+  upstream: {}
+blocks:
+  platform:
+    type: ai-platform-foundation
+secrets:
+  - name: inference
+    vault_path: sec-value-path-test/inference
+    fields:
+      - name: provider
+        value: gemini
+      - name: api_key
+        path: ~/.gemini-api-key
+wiring: []
+custom: {}
+"""
+
+
+class TestTopLevelSecretsValuePath:
+    """Field-level value:/path: defaults on the Vault-free QS path."""
+
+    def test_literal_value_rendered_as_template_default(self, tmp_path):
+        out = _qs(tmp_path, VALUE_PATH_SECRETS_SPEC)
+        inference = (out / 'chart' / 'templates' / 'secrets' / 'inference.yaml').read_text()
+        assert 'default "gemini"' in inference
+
+    def test_create_secrets_uses_literal_value(self, tmp_path):
+        out = _qs(tmp_path, VALUE_PATH_SECRETS_SPEC)
+        sh = (out / 'scripts' / 'create-secrets.sh').read_text()
+        assert 'PROVIDER=gemini' in sh
+        assert 'read -rsp "Enter provider' not in sh
+
+    def test_create_secrets_reads_path_from_file(self, tmp_path):
+        out = _qs(tmp_path, VALUE_PATH_SECRETS_SPEC)
+        sh = (out / 'scripts' / 'create-secrets.sh').read_text()
+        assert 'API_KEY=$(cat "~/.gemini-api-key")' in sh
+        assert 'read -rsp "Enter api_key' not in sh
+
+    def test_create_secrets_is_valid_bash(self, tmp_path):
+        import subprocess
+        out = _qs(tmp_path, VALUE_PATH_SECRETS_SPEC)
+        sh = out / 'scripts' / 'create-secrets.sh'
+        r = subprocess.run(['bash', '-n', str(sh)], capture_output=True, text=True)
+        assert r.returncode == 0, f"bash syntax error: {r.stderr}"
+
+
 class TestExternalSecretStripping:
     """Custom-chart ExternalSecrets are dropped from the QS output."""
 

@@ -399,15 +399,20 @@ class ValuesGeneratorMixin:
         """
         secrets_entries = []
         for secret in top_level_secrets:
-            if secret.on_missing == 'generate':
-                fields = [{
-                    'name': f.name,
-                    'onMissingValue': 'generate',
-                    'vaultPolicy': 'validatedPatternDefaultPolicy',
-                } for f in secret.fields]
-            else:
-                fields = [{'name': f.name, 'value': '', 'onMissingValue': 'prompt'}
-                          for f in secret.fields]
+            fields = []
+            for f in secret.fields:
+                if f.path is not None:
+                    fields.append({'name': f.name, 'path': f.path})
+                elif f.value is not None:
+                    fields.append({'name': f.name, 'value': f.value})
+                elif secret.on_missing == 'generate':
+                    fields.append({
+                        'name': f.name,
+                        'onMissingValue': 'generate',
+                        'vaultPolicy': 'validatedPatternDefaultPolicy',
+                    })
+                else:
+                    fields.append({'name': f.name, 'value': '', 'onMissingValue': 'prompt'})
             if not fields:
                 # Declared secret with no fields — add a single 'value' field
                 # as a placeholder so the template is always well-formed.

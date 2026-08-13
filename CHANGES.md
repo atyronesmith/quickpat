@@ -8,7 +8,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Top-level `secrets:` fields can now set a literal `value:` default or a
+  `path:` file source instead of the generate/prompt flow, on both the VP
+  (`values-secret.yaml.template`) and QS (`create-secrets.sh` + plain
+  `Secret` templates) paths. Closes a gap found converging a QuickPat-
+  generated Validated Pattern against a hand-crafted reference
+  (FIELDCTO-2507).
+
 ### Fixed
+- Custom components with `deploy: manual` no longer get a stub chart
+  generated on the VP path (`_generate_custom_component_stubs`) — the QS
+  path already skipped them. Manual components have no ArgoCD application
+  referencing the chart, so the stub was dead output (FIELDCTO-2508).
 - `compose_qs_from_spec` (`--format qs`) never ran `validate_spec` before
   compiling — the VP path (`compose_from_spec`) has always aborted on
   error-severity spec issues (bad wiring refs, unknown block types, duplicate

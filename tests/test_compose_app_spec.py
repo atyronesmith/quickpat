@@ -871,6 +871,13 @@ class TestManualDeploy:
         assert 'runtime-app' in apps
         assert apps['runtime-app']['namespace'] == 'runtime-ns'
 
+    def test_manual_component_no_stub_chart(self, tmp_path):
+        # deploy: manual components aren't ArgoCD-managed and have no source
+        # chart in the app repo -- QuickPat must not emit a stub chart for
+        # them (an empty charts/build-job/ that nothing references).
+        out = _compose(tmp_path, _MANUAL_DEPLOY_SPEC)
+        assert not (out / 'charts' / 'build-job').exists()
+
     def test_invalid_deploy_value_raises(self, tmp_path):
         bad_spec = _MANUAL_DEPLOY_SPEC.replace("deploy: manual", "deploy: auto")
         spec_file = tmp_path / 'spec.yaml'
@@ -1159,6 +1166,42 @@ secrets:
             assert f['onMissingValue'] == 'generate'
             assert f['vaultPolicy'] == 'validatedPatternDefaultPolicy'
             assert 'value' not in f
+
+    def test_field_with_literal_value_default(self, tmp_path):
+        # A field with an explicit `value:` in spec.yaml becomes a literal
+        # default in the template -- no onMissingValue at all.
+        spec_with_default = _SECRETS_SPEC + """\
+  - name: inference
+    vault_path: secrets-test/inference
+    fields:
+      - name: provider
+        value: gemini
+      - name: api_key
+"""
+        out = _compose(tmp_path, spec_with_default)
+        tmpl = _read_yaml(out / 'values-secret.yaml.template')
+        inference = next(s for s in tmpl['secrets'] if s['name'] == 'inference')
+        provider = next(f for f in inference['fields'] if f['name'] == 'provider')
+        assert provider == {'name': 'provider', 'value': 'gemini'}
+        assert 'onMissingValue' not in provider
+
+    def test_field_with_path_source(self, tmp_path):
+        # A field with `path:` reads its value from a local file at secret
+        # load time -- no onMissingValue, no value key.
+        spec_with_path = _SECRETS_SPEC + """\
+  - name: inference
+    vault_path: secrets-test/inference
+    fields:
+      - name: api_key
+        path: ~/.gemini-api-key
+"""
+        out = _compose(tmp_path, spec_with_path)
+        tmpl = _read_yaml(out / 'values-secret.yaml.template')
+        inference = next(s for s in tmpl['secrets'] if s['name'] == 'inference')
+        api_key = next(f for f in inference['fields'] if f['name'] == 'api_key')
+        assert api_key == {'name': 'api_key', 'path': '~/.gemini-api-key'}
+        assert 'onMissingValue' not in api_key
+        assert 'value' not in api_key
 
 
 # ── Doc filtering and spec docs pipeline ─────────────────────────────────────

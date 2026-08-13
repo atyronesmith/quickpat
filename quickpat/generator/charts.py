@@ -87,6 +87,9 @@ class ChartsGeneratorMixin:
         spec_dir = self.config.get('spec_dir')
 
         for comp_name, comp in custom_components.items():
+            if getattr(comp, 'deploy', 'argocd') == 'manual':
+                continue
+
             chart_dst = self.output_dir / 'charts' / comp_name
 
             if comp_name in existing and spec_dir:

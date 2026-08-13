@@ -8,6 +8,8 @@ Infrastructure blocks (ai-platform-foundation, gpu-compute) return only
 prerequisite strings for NOTES.txt — they are not deployed by the QS chart.
 """
 
+import shlex
+
 
 def _camel(name: str) -> str:
     """Convert kebab-case to camelCase for Helm values keys."""
@@ -1232,6 +1234,7 @@ def build_create_secrets_sh(
         keys = decl['keys']
         generate = decl.get('generate', False)
         optional = decl.get('optional', False)
+        field_defaults = decl.get('field_defaults', {})
 
         label = f'# Secret: {name}' + ('  (optional — press Enter to skip)' if optional else '')
         lines.append(label)
@@ -1241,7 +1244,12 @@ def build_create_secrets_sh(
         for k in keys:
             prompt_var = k.upper().replace('-', '_')
             prompt_vars.append(prompt_var)
-            if generate:
+            default = field_defaults.get(k, {})
+            if default.get('path'):
+                lines.append(f'{prompt_var}=$(cat "{default["path"]}")')
+            elif default.get('value') is not None:
+                lines.append(f'{prompt_var}={shlex.quote(str(default["value"]))}')
+            elif generate:
                 lines.append(
                     f'{prompt_var}=$(openssl rand -base64 16 | tr -dc a-zA-Z0-9 | head -c 20)'
                 )

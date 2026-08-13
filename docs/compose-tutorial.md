@@ -236,6 +236,8 @@ The FastAPI app, chunker, language detector, and Shiny dashboard are unique to l
 
 For hand-written charts that need ArgoCD value overrides, declare `extraValueFiles: [/overrides/<name>.yaml]` and keep the values in `<spec_dir>/overrides/<name>.yaml` (copied into `vp-out/overrides/` on every compose, same model as `charts/`). Or set `extraValues:` inline on the custom component (parity with `upstream.extraValues`).
 
+Set `deploy: manual` on a component that's build-time-only and must not be ArgoCD-managed (e.g. a one-shot image-build pipeline run via `make`). Manual components are excluded from `values-prod.yaml` applications on the VP path and from the chart on the QS path, and neither generator emits a stub or copies a chart for them — there's nothing in the output for anything to reference.
+
 ---
 
 ## Running compose
@@ -396,6 +398,28 @@ secrets:
 ```
 
 The upstream chart hardcodes `THEACCESSKEY` and `THESECRETKEY` in the MinIO deployment. The spec declares them as Vault-managed secrets — an improvement the spec catches that a manual review would need to catch manually.
+
+### Top-level `secrets:` and field-level `value:`/`path:`
+
+Besides block-level secrets, a spec can declare a top-level `secrets:` list — one named Vault-secret group per entry, independent of any block. Each field may set `onMissingValue` (`prompt` / `skip` / `generate`, default `prompt`) or, instead, a literal default:
+
+```yaml
+secrets:
+  - name: inference
+    vault_path: my-pattern/inference
+    fields:
+      - name: provider
+        value: gemini              # literal default, no prompt
+      - name: model
+        value: gemini-2.5-flash
+      - name: api_key
+        path: ~/.gemini-api-key    # read from a local file at secret-load time
+```
+
+- `value:` emits a fixed default (`{name, value}`, no `onMissingValue`) — use for a field that always starts with a known value (e.g. a default provider).
+- `path:` emits a file source (`{name, path}`, no `onMissingValue`) — use for a field whose value lives in a local file rather than being typed in or generated (e.g. an SSH key or an API key file).
+- Setting both on one field is a validator warning; `path` wins.
+- On the Vault-free QS path, the same field renders as a literal default (`value:`) or is read from the file at `create-secrets.sh` time (`path:`), so QS and VP output stay behaviorally consistent.
 
 ---
 

@@ -242,6 +242,16 @@ def _check_secrets(spec: ApplicationSpec) -> list:
                         f"(e.g. '- name: api_key') or remove this secret",
             ))
 
+        # Field-level value/path conflict
+        for field in secret.fields:
+            if field.value is not None and field.path is not None:
+                issues.append(Issue(
+                    file='spec.yaml',
+                    severity='warning',
+                    message=f"{loc}: field '{field.name}' sets both 'value' and 'path' — "
+                            f"'path' takes precedence and 'value' will be ignored",
+                ))
+
         # SV-7: vault_path convention
         if secret.vault_path:
             last_segment = secret.vault_path.split('/')[-1]
