@@ -251,6 +251,16 @@ def _check_secrets(spec: ApplicationSpec) -> list:
                     message=f"{loc}: field '{field.name}' sets both 'value' and 'path' — "
                             f"'path' takes precedence and 'value' will be ignored",
                 ))
+            elif field.value is not None:
+                issues.append(Issue(
+                    file='spec.yaml',
+                    severity='warning',
+                    message=f"{loc}: field '{field.name}' sets a literal 'value' — this gets "
+                            f"written in cleartext into generated output (scripts/create-secrets.sh "
+                            f"and templates/secrets/*.yaml), which is typically committed to git. "
+                            f"Only use 'value' for non-sensitive defaults; for real credentials use "
+                            f"'path' (local file, not embedded) or omit the field to prompt/generate.",
+                ))
 
         # SV-7: vault_path convention
         if secret.vault_path:
