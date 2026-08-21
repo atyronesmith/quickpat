@@ -1338,6 +1338,16 @@ def cmd_validate(args):
     sys.exit(0 if result.valid else 1)
 
 
+def _sanitize_warning_for_display(warning):
+    """Redact potentially sensitive warning details before printing."""
+    text = str(warning)
+    lowered = text.lower()
+    sensitive_markers = ("secret", "token", "password", "apikey", "api_key", "key")
+    if any(marker in lowered for marker in sensitive_markers):
+        return "[REDACTED] Warning contains potentially sensitive details."
+    return text
+
+
 def _print_transform_result(result: TransformResult):
     if result.success:
         output_dir = result.pattern_dir
@@ -1360,11 +1370,11 @@ def _print_transform_result(result: TransformResult):
         if result.warnings:
             print("\nWarnings:")
             for w in result.warnings:
-                print(f"  {w}")
+                print(f"  {_sanitize_warning_for_display(w)}")
     else:
         print("Transform failed:")
         for w in result.warnings:
-            print(f"  {w}")
+            print(f"  {_sanitize_warning_for_display(w)}")
 
 
 def ask(prompt, default=None):

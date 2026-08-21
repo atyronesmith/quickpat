@@ -455,6 +455,53 @@ class TestSecretFields:
         _, result, _ = _validate(spec_yaml, tmp_path)
         assert not any('fields' in w for w in _warnings(result))
 
+    def test_secret_field_with_literal_value_is_warning(self, tmp_path):
+        spec_yaml = """\
+            apiVersion: supplychain/v1alpha1
+            kind: ApplicationSpec
+            metadata:
+              name: test
+              tier: sandbox
+              upstream: {}
+            blocks: {}
+            wiring: []
+            custom: {}
+            vault:
+              enabled: true
+            secrets:
+              - name: my-key
+                vault_path: test/my-key
+                fields:
+                  - name: api_key
+                    value: sk-not-a-real-secret
+            """
+        _, result, _ = _validate(spec_yaml, tmp_path)
+        assert result.valid  # warning only
+        assert any('literal' in w and 'api_key' in w for w in _warnings(result))
+
+    def test_secret_field_with_path_no_literal_value_warning(self, tmp_path):
+        spec_yaml = """\
+            apiVersion: supplychain/v1alpha1
+            kind: ApplicationSpec
+            metadata:
+              name: test
+              tier: sandbox
+              upstream: {}
+            blocks: {}
+            wiring: []
+            custom: {}
+            vault:
+              enabled: true
+            secrets:
+              - name: my-key
+                vault_path: test/my-key
+                fields:
+                  - name: api_key
+                    path: /run/secrets/api_key
+            """
+        _, result, _ = _validate(spec_yaml, tmp_path)
+        assert not any('literal' in w for w in _warnings(result))
+
 
 # ── SV-7: vault_path convention ────────────────────────────────────────────────
 

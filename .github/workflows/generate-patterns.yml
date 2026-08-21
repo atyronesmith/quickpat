@@ -258,9 +258,10 @@ jobs:
           REPO="${{ github.repository }}"
           PR="${{ github.event.pull_request.number }}"
 
-          # Check for existing comment to update
-          EXISTING=$(gh pr view "$PR" --repo "$REPO" \
-            --json comments --jq '.comments[] | select(.body | contains("quickpat-validation-summary")) | .id' \
+          # Check for existing comment to update (numeric REST id, not the
+          # GraphQL node id `gh pr view --json comments` would return)
+          EXISTING=$(gh api "repos/${REPO}/issues/${PR}/comments" \
+            --jq '.[] | select(.body | contains("quickpat-validation-summary")) | .id' \
             2>/dev/null | head -1)
 
           BODY="${MARKER}
