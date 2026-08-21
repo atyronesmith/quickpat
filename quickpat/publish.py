@@ -219,7 +219,7 @@ def _read_pattern_name(vp_out_dir: Path) -> str | None:
         return None
     try:
         data = yaml.safe_load(metadata_path.read_text())
-    except Exception:
+    except (OSError, yaml.YAMLError):
         return None
     return (data or {}).get('name')
 

@@ -332,7 +332,7 @@ class QuickstartAnalyzer:
             for f in chart_path.rglob(ext):
                 try:
                     texts.append(f.read_text(errors='ignore'))
-                except Exception:
+                except OSError:
                     pass
         return '\n'.join(texts)
 
@@ -359,7 +359,7 @@ class QuickstartAnalyzer:
                 capture_output=True, text=True, timeout=5,
             )
             repo_url = result.stdout.strip() if result.returncode == 0 else ''
-        except Exception:
+        except (OSError, subprocess.SubprocessError):
             repo_url = ''
 
         if not repo_url:

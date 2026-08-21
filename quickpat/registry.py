@@ -25,7 +25,7 @@ def fetch_registry(url: str | None = None) -> list:
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             content = resp.read().decode()
-    except Exception as e:
+    except (OSError, ValueError) as e:
         raise RuntimeError(f"Failed to fetch registry: {e}")
 
     return _parse_gitmodules(content)
@@ -69,6 +69,7 @@ def resolve_name(name: str, registry: list | None = None) -> str:
     """
     if registry is None:
         registry = fetch_registry()
+    registry = [e for e in registry if "url" in e]
 
     # Exact match
     for entry in registry:
@@ -117,7 +118,7 @@ def fetch_chart_index(url: str | None = None) -> dict:
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             index = yaml.safe_load(resp.read())
-    except Exception as e:
+    except (OSError, ValueError, yaml.YAMLError) as e:
         raise RuntimeError(f"Failed to fetch chart index: {e}")
 
     latest = {}

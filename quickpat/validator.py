@@ -986,7 +986,7 @@ def _load_yaml(path: Path) -> Optional[dict]:
     try:
         with open(path) as f:
             return yaml.safe_load(f) or {}
-    except Exception:
+    except (OSError, yaml.YAMLError):
         return None
 
 

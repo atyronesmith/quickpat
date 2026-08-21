@@ -1,10 +1,14 @@
 """Tests for Anthropic LLM provider."""
 
+import pytest
 from unittest.mock import MagicMock, patch
 
 from quickpat import config
-from quickpat.providers.anthropic import AnthropicProvider
-from quickpat.providers.factory import make_provider
+
+pytest.importorskip("anthropic")
+
+from quickpat.providers.anthropic import AnthropicProvider   # noqa: E402
+from quickpat.providers.factory import make_provider   # noqa: E402
 
 
 class TestAnthropicMaxTokens:

@@ -99,7 +99,7 @@ function version {
 }
 
 if [ -z "${PATTERN_UTILITY_CONTAINER:-}" ]; then
-	PATTERN_UTILITY_CONTAINER="quay.io/validatedpatterns/utility-container"
+    PATTERN_UTILITY_CONTAINER="quay.io/validatedpatterns/utility-container"
 fi
 if [ -n "${PATTERN_DISCONNECTED_HOME:-}" ]; then
     PATTERN_UTILITY_CONTAINER="${PATTERN_DISCONNECTED_HOME}/utility-container"
@@ -116,11 +116,11 @@ for cmd in "${commands[@]}"; do is_available "$cmd"; done
 UNSUPPORTED_PODMAN_VERSIONS="1.6 1.5"
 PODMAN_VERSION_STR=$(podman --version) || { echo "Failed to get podman version"; exit 1; }
 for i in ${UNSUPPORTED_PODMAN_VERSIONS}; do
-	if echo "${PODMAN_VERSION_STR}" | grep -q -E "\b${i}"; then
-		echo "Unsupported podman version. We recommend > 4.3.0"
-		podman --version
-		exit 1
-	fi
+    if echo "${PODMAN_VERSION_STR}" | grep -q -E "\b${i}"; then
+        echo "Unsupported podman version. We recommend > 4.3.0"
+        podman --version
+        exit 1
+    fi
 done
 
 PODMAN_VERSION=$(echo "${PODMAN_VERSION_STR}" | awk '{ print $NF }')

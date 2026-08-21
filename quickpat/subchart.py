@@ -76,14 +76,14 @@ def fetch_subchart(name: str, version: str, repo_url: str,
             timeout = 10
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = resp.read()
-    except Exception:
+    except (OSError, ValueError):
         return None
 
     try:
         cache_path.mkdir(parents=True, exist_ok=True)
         with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as tar:
             tar.extractall(cache_path, filter='data')
-    except Exception:
+    except (tarfile.TarError, OSError, EOFError):
         return None
 
     return cache_path
@@ -99,7 +99,7 @@ def _resolve_archive_url(name: str, version: str, repo_url: str) -> str:
             timeout = 10
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             index = yaml.safe_load(resp.read())
-    except Exception:
+    except (OSError, ValueError, yaml.YAMLError):
         return ""
 
     entries = index.get("entries", {}).get(name, [])
@@ -443,7 +443,7 @@ def extract_resource_types_from_templates(
     for tmpl in templates_dir.glob('*.yaml'):
         try:
             raw = tmpl.read_text(errors='ignore')
-        except Exception:
+        except OSError:
             continue
 
         cleaned = strip_go_templates(raw)
@@ -474,7 +474,7 @@ def _parse_resource_types_yaml(content: str) -> list[tuple[str, str]]:
             kind = str(kind)
             group = api_ver.rsplit('/', 1)[0] if '/' in api_ver else ''
             pairs.append((group, kind))
-    except Exception:
+    except yaml.YAMLError:
         pass
     return pairs
 

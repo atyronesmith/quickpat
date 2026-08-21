@@ -17,7 +17,7 @@ from .pipeline import transform, transform_remote, skill_analyze, compose_from_s
 from .profile import load_profile
 from .readiness import check_readiness
 from .registry import (
-    fetch_registry, resolve_name, check_dependency_freshness,
+    fetch_registry, check_dependency_freshness,
     detect_local_forks, fetch_chart_index,
 )
 from .validator import validate, validate_and_fix
